@@ -1,0 +1,50 @@
+# Local development: PostgreSQL + the API, both in Docker. UNVERIFIED in the authoring sandbox (no Docker):
+#   cp .env.example .env    then    docker compose up --build
+# The production database is Supabase and is never run from Compose (NN-13).
+services:
+  postgres:
+    image: postgres:16
+    container_name: zuscar_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?copy .env.example to .env first}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?copy .env.example to .env first}
+      POSTGRES_DB: ${POSTGRES_DB:?copy .env.example to .env first}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      target: dev
+    container_name: zuscar_backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+
+  # docker compose run --rm test      (runs every Go test, including the database tests)
+  test:
+    profiles: ["tools"]
+    build:
+      context: .
+      target: test
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      TEST_DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/postgres?sslmode=disable
+
+volumes:
+  postgres_data:

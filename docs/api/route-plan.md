@@ -1,0 +1,196 @@
+# API route plan (Stage 3)
+
+Design only: no route exists yet. The machine-readable source is `docs/api/routes.csv` (155 rows); Stage 7's AC-10 test reads it, and every stage must add its routes to it and to `openapi.yaml` (created at Stage 4, kept current from then on).
+
+## Conventions
+- JSON REST under `/api/v1`; `/healthz` and `/readyz` sit at the API root (not under `/api`, so the Next.js rewrite does not expose them; they are for Render and operators).
+- Auth: HttpOnly session cookie plus `X-CSRF-Token` header on every state-changing request (ADR-13). Unauthenticated returns 401; authenticated without permission returns 403 (AC-10). Permission is checked in the service, not only middleware.
+- Error body for every failure: `{ "error": { "code", "message", "fields": [{"field","message"}], "request_id" } }`. Codes include `validation_failed`, `unauthenticated`, `forbidden`, `not_found`, `invalid_transition`, `room_unavailable`, `idempotency_conflict` (409 in flight), `idempotency_key_reused` (422 different body), `rate_limited` (429), `account_locked`, `reauth_required`.
+- `Idempotency-Key` is required (400 if missing) on every route marked Y: all money and stock effects, plus send-to-kitchen because a double click must not issue two ticket numbers. Routes marked opt accept it. Same key and body returns the stored response; same key and different body returns 422 (ADR-08).
+- Lists use `limit` (default 50, max 200) and an opaque `cursor`; filters are explicit query parameters. Request body limit from `MAX_REQUEST_BYTES`.
+- Money in JSON is integer cents (`total_cents`), never decimals. Dates are ISO 8601; business dates are `YYYY-MM-DD` in Africa/Nairobi.
+- Optimistic concurrency on orders via `version`; stale writes return 409.
+- Three permission keys are checked inside handlers rather than owning a route: `sales.discount` (a discount line in the finalise body), `inventory.override_negative` (negative-stock override on adjustments, wastage and sale deduction) and `reports.export` (`?format=csv` on report routes). AC-10 tests cover them with dedicated cases.
+- Scope rules (own records, own location, bar only) are enforced server-side per `rbac.md` notes.
+- Gated routes are listed so the boundary is visible; they are not built until DG-01 and DG-02 are verified (NN-11, NN-12).
+
+## Counts by stage
+| Stage | Routes | Idempotency required |
+|---|---|---|
+| 4 | 2 | 0 |
+| 6 | 6 | 0 |
+| 7 | 22 | 0 |
+| 9 | 12 | 0 |
+| 10 | 14 | 1 |
+| 11 | 8 | 3 |
+| 12 | 7 | 4 |
+| 14 | 9 | 0 |
+| 15 | 2 | 2 |
+| 16 | 2 | 1 |
+| 17 | 13 | 3 |
+| 18 | 8 | 3 |
+| 19 | 7 | 1 |
+| 20 | 16 | 0 |
+| 21 | 16 | 6 |
+| 23 | 7 | 0 |
+| 24 | 1 | 0 |
+| gated | 2 | 0 |
+
+## Routes
+| Method | Path | Permission | Idem | Stage | Note |
+|---|---|---|---|---|---|
+| GET | `/healthz` | public | - | 4 | process up |
+| GET | `/readyz` | public | - | 4 | database reachable |
+| GET | `/api/v1/health` | public | - | 5 | liveness through the web proxy (connection indicator) |
+| POST | `/api/v1/auth/login` | public | - | 6 | rate limited, lockout, sets session and csrf cookies |
+| POST | `/api/v1/auth/logout` | authenticated | - | 6 | revokes current session |
+| GET | `/api/v1/auth/me` | authenticated | - | 6 | user, roles, permission keys |
+| POST | `/api/v1/auth/change-password` | authenticated | - | 6 | forced at first login when must_change_password |
+| POST | `/api/v1/auth/reauth` | authenticated | - | 6 | password re-entry for sensitive actions (S-16) |
+| POST | `/api/v1/auth/pin-switch` | terminal session | - | 6 | floor roles only (A-07), attempt limits |
+| GET | `/api/v1/users` | users.update | - | 7 |  |
+| POST | `/api/v1/users` | users.create | - | 7 | non-privileged targets for Business Manager |
+| GET | `/api/v1/users/{id}` | users.update | - | 7 |  |
+| PATCH | `/api/v1/users/{id}` | users.update | - | 7 | audited before/after |
+| PUT | `/api/v1/users/{id}/roles` | users.update | - | 7 | no-escalation guard, protected rules |
+| POST | `/api/v1/users/{id}/deactivate` | users.deactivate | - | 7 | revokes sessions, last Super Admin guard |
+| POST | `/api/v1/users/{id}/reactivate` | users.update | - | 7 |  |
+| POST | `/api/v1/users/{id}/reset-password` | users.update | - | 7 | reauth required, forces change |
+| PUT | `/api/v1/users/{id}/pin` | users.update | - | 7 | floor roles only |
+| DELETE | `/api/v1/users/{id}` | users.delete | - | 7 | only accounts with no history |
+| GET | `/api/v1/roles` | roles.manage | - | 7 |  |
+| POST | `/api/v1/roles` | roles.manage | - | 7 |  |
+| PATCH | `/api/v1/roles/{id}` | roles.manage | - | 7 | protected roles refused |
+| DELETE | `/api/v1/roles/{id}` | roles.manage | - | 7 | refused while assigned |
+| GET | `/api/v1/permissions` | roles.manage | - | 7 |  |
+| PUT | `/api/v1/roles/{id}/permissions` | permissions.assign | - | 7 | system.admin refused, reauth required |
+| GET | `/api/v1/audit-logs` | audit.view | - | 7 | scope: operational vs security events |
+| GET | `/api/v1/settings` | authenticated | - | 7 | non-secret business settings |
+| PATCH | `/api/v1/settings` | system.admin | - | 7 | reauth, audited |
+| GET | `/api/v1/tax-rates` | authenticated | - | 7 |  |
+| POST | `/api/v1/tax-rates` | system.admin | - | 7 |  |
+| PATCH | `/api/v1/tax-rates/{id}` | system.admin | - | 7 |  |
+| GET | `/api/v1/menu` | orders.manage | - | 9 | available categories, products, modifiers |
+| GET | `/api/v1/categories` | catalogue.manage | - | 9 |  |
+| POST | `/api/v1/categories` | catalogue.manage | - | 9 |  |
+| PATCH | `/api/v1/categories/{id}` | catalogue.manage | - | 9 |  |
+| GET | `/api/v1/products` | catalogue.manage | - | 9 |  |
+| POST | `/api/v1/products` | catalogue.manage | - | 9 |  |
+| PATCH | `/api/v1/products/{id}` | catalogue.manage | - | 9 |  |
+| PUT | `/api/v1/products/{id}/price` | catalogue.manage | - | 9 | writes price_history, audited |
+| PUT | `/api/v1/products/{id}/availability` | catalogue.manage | - | 9 |  |
+| GET | `/api/v1/modifiers` | catalogue.manage | - | 9 |  |
+| POST | `/api/v1/modifiers` | catalogue.manage | - | 9 |  |
+| PATCH | `/api/v1/modifiers/{id}` | catalogue.manage | - | 9 |  |
+| GET | `/api/v1/tables` | orders.manage | - | 10 |  |
+| POST | `/api/v1/tables` | catalogue.manage | - | 10 |  |
+| PATCH | `/api/v1/tables/{id}` | catalogue.manage | - | 10 |  |
+| POST | `/api/v1/orders` | orders.manage | opt | 10 |  |
+| GET | `/api/v1/orders` | orders.manage | - | 10 | scope: own unless sales.view all |
+| GET | `/api/v1/orders/{id}` | orders.manage | - | 10 |  |
+| POST | `/api/v1/orders/{id}/items` | orders.manage | - | 10 | price taken from server |
+| PATCH | `/api/v1/orders/{id}/items/{itemId}` | orders.manage | - | 10 | quantity or note while open or sent |
+| POST | `/api/v1/orders/{id}/items/{itemId}/cancel` | orders.manage | - | 10 | reason; update ticket if already sent |
+| POST | `/api/v1/orders/{id}/send-to-kitchen` | orders.manage | Y | 10 | persists ticket and number first (AC-04) |
+| POST | `/api/v1/orders/{id}/cancel` | orders.manage | - | 10 | reason, audited |
+| GET | `/api/v1/kitchen/tickets` | kitchen.view | - | 10 |  |
+| GET | `/api/v1/kitchen/tickets/{id}` | kitchen.view | - | 10 |  |
+| POST | `/api/v1/kitchen/tickets/{id}/status` | kitchen.update | - | 10 | forward transitions only |
+| GET | `/api/v1/orders/{id}/bill` | sales.create | - | 11 | unpaid bill data |
+| POST | `/api/v1/orders/{id}/finalise` | sales.create | Y | 11 | atomic sale; discount needs sales.discount |
+| GET | `/api/v1/sales` | sales.view | - | 11 | scope: own or all |
+| GET | `/api/v1/sales/{id}` | sales.view | - | 11 |  |
+| POST | `/api/v1/sales/{id}/payments` | sales.create | Y | 11 | cash confirmed, other manual pending |
+| POST | `/api/v1/payments/{id}/confirm` | payments.reconcile | Y | 11 | pending to confirmed, audited |
+| POST | `/api/v1/payments/{id}/fail` | payments.reconcile | - | 11 | pending to failed, audited |
+| GET | `/api/v1/payments` | sales.view | - | 11 | filter by status, method, shift |
+| POST | `/api/v1/shifts/open` | shifts.manage | Y | 12 | opening float |
+| GET | `/api/v1/shifts/current` | shifts.manage | - | 12 |  |
+| GET | `/api/v1/shifts` | shifts.close | - | 12 | own, or all for manager |
+| GET | `/api/v1/shifts/{id}/summary` | shifts.manage | - | 12 | expected cash breakdown |
+| POST | `/api/v1/shifts/{id}/cash-movements` | shifts.manage | Y | 12 | paid-in, paid-out, expense |
+| POST | `/api/v1/shifts/{id}/close` | shifts.close | Y | 12 | declared cash, variance |
+| POST | `/api/v1/shifts/{id}/reconcile` | payments.reconcile | Y | 12 |  |
+| GET | `/api/v1/print/documents/receipt/{saleId}` | sales.view | - | 14 | render data from stored snapshot |
+| GET | `/api/v1/print/documents/ticket/{ticketId}` | kitchen.view | - | 14 |  |
+| GET | `/api/v1/print/documents/bill/{orderId}` | sales.create | - | 14 |  |
+| POST | `/api/v1/print/jobs` | authenticated | - | 14 | permission checked per document type |
+| POST | `/api/v1/print/jobs/{id}/attempts` | authenticated | - | 14 | record printed or failed |
+| POST | `/api/v1/print/jobs/{id}/retry` | authenticated | - | 14 | same job only |
+| POST | `/api/v1/print/jobs/{id}/reprint` | sales.reprint | - | 14 | new job, REPRINT marker; tickets need kitchen.view |
+| GET | `/api/v1/print/jobs` | authenticated | - | 14 |  |
+| GET | `/api/v1/print/test-page` | authenticated | - | 14 | AC-16, DG-03 |
+| POST | `/api/v1/sales/{id}/void` | sales.void | Y | 15 | reason, compensating records |
+| POST | `/api/v1/sales/{id}/refunds` | sales.refund | Y | 15 | reason, approver, compensating records |
+| POST | `/api/v1/reconciliation/manual-receipts` | payments.reconcile | Y | 16 | duplicate guard on manual receipt number |
+| GET | `/api/v1/reconciliation/manual-receipts` | payments.reconcile | - | 16 |  |
+| GET | `/api/v1/inventory/items` | inventory.view | - | 17 |  |
+| POST | `/api/v1/inventory/items` | inventory.adjust | - | 17 |  |
+| PATCH | `/api/v1/inventory/items/{id}` | inventory.adjust | - | 17 |  |
+| GET | `/api/v1/inventory/units` | inventory.view | - | 17 |  |
+| POST | `/api/v1/inventory/units` | inventory.adjust | - | 17 |  |
+| PUT | `/api/v1/inventory/items/{id}/conversions` | inventory.adjust | - | 17 |  |
+| GET | `/api/v1/inventory/locations` | inventory.view | - | 17 |  |
+| POST | `/api/v1/inventory/locations` | inventory.adjust | - | 17 |  |
+| GET | `/api/v1/inventory/balances` | inventory.view | - | 17 | derived from movements |
+| GET | `/api/v1/inventory/movements` | inventory.view | - | 17 |  |
+| POST | `/api/v1/inventory/opening-balances` | inventory.adjust | Y | 17 | audited opening movements |
+| POST | `/api/v1/inventory/adjustments` | inventory.adjust | Y | 17 | reason required; negative stock needs override_negative |
+| POST | `/api/v1/inventory/movements/{id}/reverse` | inventory.adjust | Y | 17 | compensating movement |
+| POST | `/api/v1/inventory/transfers` | inventory.transfer | Y | 18 | paired movements |
+| POST | `/api/v1/inventory/wastage` | inventory.wastage | Y | 18 | wastage, breakage, complimentary |
+| GET | `/api/v1/suppliers` | purchasing.manage | - | 18 |  |
+| POST | `/api/v1/suppliers` | purchasing.manage | - | 18 |  |
+| PATCH | `/api/v1/suppliers/{id}` | purchasing.manage | - | 18 |  |
+| GET | `/api/v1/purchases` | purchasing.manage | - | 18 |  |
+| POST | `/api/v1/purchases` | purchasing.manage | - | 18 |  |
+| POST | `/api/v1/purchases/{id}/receive` | purchasing.manage | Y | 18 | receipt movements |
+| GET | `/api/v1/inventory/counts` | inventory.adjust | - | 19 |  |
+| POST | `/api/v1/inventory/counts` | inventory.adjust | - | 19 |  |
+| PUT | `/api/v1/inventory/counts/{id}/lines` | inventory.adjust | - | 19 |  |
+| POST | `/api/v1/inventory/counts/{id}/approve` | inventory.adjust | Y | 19 | posts count_adjustment movements |
+| GET | `/api/v1/recipes` | catalogue.manage | - | 19 | off unless configured |
+| PUT | `/api/v1/recipes/{productId}` | catalogue.manage | - | 19 |  |
+| GET | `/api/v1/inventory/low-stock` | inventory.view | - | 19 |  |
+| GET | `/api/v1/room-types` | rooms.manage | - | 20 |  |
+| POST | `/api/v1/room-types` | rooms.manage | - | 20 |  |
+| PATCH | `/api/v1/room-types/{id}` | rooms.manage | - | 20 |  |
+| GET | `/api/v1/rooms` | rooms.manage | - | 20 |  |
+| POST | `/api/v1/rooms` | rooms.manage | - | 20 |  |
+| PATCH | `/api/v1/rooms/{id}` | rooms.manage | - | 20 |  |
+| GET | `/api/v1/guests` | rooms.manage | - | 20 |  |
+| POST | `/api/v1/guests` | rooms.manage | - | 20 |  |
+| PATCH | `/api/v1/guests/{id}` | rooms.manage | - | 20 |  |
+| GET | `/api/v1/availability` | rooms.manage | - | 20 | informational; constraint is the authority |
+| GET | `/api/v1/reservations` | rooms.manage | - | 20 |  |
+| POST | `/api/v1/reservations` | rooms.manage | opt | 20 | overlap returns 409 (AC-07) |
+| PATCH | `/api/v1/reservations/{id}` | rooms.manage | - | 20 |  |
+| POST | `/api/v1/reservations/{id}/confirm` | rooms.manage | - | 20 |  |
+| POST | `/api/v1/reservations/{id}/cancel` | rooms.manage | - | 20 | reason |
+| POST | `/api/v1/reservations/{id}/no-show` | rooms.manage | - | 20 |  |
+| POST | `/api/v1/reservations/{id}/check-in` | rooms.manage | Y | 21 | creates stay and folio |
+| POST | `/api/v1/stays/{id}/extend` | rooms.manage | - | 21 |  |
+| POST | `/api/v1/stays/{id}/change-room` | rooms.manage | - | 21 | under the same constraint |
+| POST | `/api/v1/stays/{id}/check-out` | folios.manage | Y | 21 | consolidated checkout |
+| GET | `/api/v1/rooms/in-house` | rooms.view | - | 21 | limited fields for charge authorisation |
+| GET | `/api/v1/folios/{id}` | folios.view | - | 21 |  |
+| POST | `/api/v1/folios/{id}/charges` | folios.post | Y | 21 | POS room charge, a posting not a payment |
+| POST | `/api/v1/folios/{id}/payments` | folios.manage | Y | 21 | deposit or settlement |
+| POST | `/api/v1/folios/{id}/adjustments` | folios.manage | Y | 21 | reason; manager scope |
+| POST | `/api/v1/folios/{id}/write-off` | folios.manage | Y | 21 | manager scope, approver recorded |
+| POST | `/api/v1/folios/{id}/close` | folios.manage | - | 21 | balance checked in transaction |
+| POST | `/api/v1/folios/{id}/reopen` | folios.manage | - | 21 | S-20 |
+| POST | `/api/v1/rooms/{id}/status` | rooms.manage | - | 21 | transition table in behaviour.md |
+| GET | `/api/v1/housekeeping/tasks` | rooms.manage | - | 21 |  |
+| POST | `/api/v1/housekeeping/tasks` | rooms.manage | - | 21 |  |
+| PATCH | `/api/v1/housekeeping/tasks/{id}` | rooms.manage | - | 21 |  |
+| GET | `/api/v1/reports/sales` | reports.view | - | 23 | ?format=csv needs reports.export and is audited |
+| GET | `/api/v1/reports/collections` | reports.view | - | 23 | ?format=csv needs reports.export and is audited |
+| GET | `/api/v1/reports/balances-due` | reports.view | - | 23 | ?format=csv needs reports.export and is audited |
+| GET | `/api/v1/reports/discounts-voids-refunds` | reports.view | - | 23 | ?format=csv needs reports.export and is audited |
+| GET | `/api/v1/reports/stock` | reports.view | - | 23 | ?format=csv needs reports.export and is audited |
+| GET | `/api/v1/reports/rooms` | reports.view | - | 23 | ?format=csv needs reports.export and is audited |
+| GET | `/api/v1/reports/expenses-profit` | reports.view | - | 23 | ?format=csv needs reports.export and is audited |
+| GET | `/api/v1/integrations/tax-invoices` | reports.view | - | 24 | stub, status only (DG-01) |
+| POST | `/api/v1/integrations/mpesa/callback` | provider authenticity (unspecified) | - | gated | NOT BUILT until DG-02 verified |
+| POST | `/api/v1/integrations/etims/submit` | system | - | gated | NOT BUILT until DG-01 verified |

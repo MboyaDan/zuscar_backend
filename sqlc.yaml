@@ -1,0 +1,14 @@
+# sqlc generates the repository layer (identity, settings). Run `make sqlc` after changing queries or
+# table migrations. Only table-defining migrations are listed: sqlc does not need the trigger files.
+version: "2"
+sql:
+  - engine: postgresql
+    queries: database/queries/identity
+    schema: [database/migrations/0002_identity.sql, database/migrations/0004_settings.sql]
+    gen:
+      go: { package: repository, out: internal/identity/repository, sql_package: pgx/v5 }
+  - engine: postgresql
+    queries: database/queries/settings
+    schema: [database/migrations/0002_identity.sql, database/migrations/0004_settings.sql]
+    gen:
+      go: { package: repository, out: internal/settings/repository, sql_package: pgx/v5 }

@@ -1,0 +1,8 @@
+bin/
+*.test
+.env
+.env.*
+!.env.example
+*.zip
+coverage/
+.DS_Store

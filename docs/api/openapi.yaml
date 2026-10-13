@@ -1,0 +1,78 @@
+openapi: 3.0.3
+info:
+  title: Zuscar API
+  version: 0.0.0
+  description: >
+    Kept current every stage. Stage 4 documents only the platform endpoints. The planned route
+    inventory is docs/api/routes.csv. Money is always integer cents.
+servers:
+  - url: http://localhost:8080
+paths:
+  /healthz:
+    get:
+      summary: Process liveness
+      operationId: healthz
+      responses:
+        "200":
+          description: Process is up
+          content:
+            application/json:
+              schema: { type: object, required: [status], properties: { status: { type: string, enum: [ok] } } }
+  /api/v1/health:
+    get:
+      summary: Liveness through the web proxy
+      description: Reachable at the web origin as /api/v1/health; used by the connection indicator.
+      operationId: apiHealth
+      responses:
+        "200":
+          description: Backend is up
+          content:
+            application/json:
+              schema: { type: object, required: [status], properties: { status: { type: string, enum: [ok] } } }
+  /readyz:
+    get:
+      summary: Readiness (database reachable)
+      operationId: readyz
+      responses:
+        "200":
+          description: Ready
+          content:
+            application/json:
+              schema: { type: object, required: [status], properties: { status: { type: string, enum: [ready] } } }
+        "503":
+          description: Database not reachable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorBody" }
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: zuscar_session
+      description: HttpOnly session cookie (arrives with Stage 6). State-changing requests also need X-CSRF-Token.
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 8, maxLength: 128 }
+      description: Required on every route that creates money or stock effects (see routes.csv).
+  schemas:
+    ErrorBody:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, request_id]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            request_id: { type: string }
+            fields:
+              type: array
+              items:
+                type: object
+                required: [field, message]
+                properties: { field: { type: string }, message: { type: string } }
