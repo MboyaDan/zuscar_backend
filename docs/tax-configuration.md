@@ -18,7 +18,7 @@ The production tax configuration must be verified against the business's VAT reg
 ## Not done and not claimed
 - **eTIMS:** not integrated. Receipts from this system are receipts, not KRA tax invoices (NN-12, DG-01). Compliance will not be claimed until the integration route has been verified and tested (Stage 24 and after).
 - **Other taxes or levies** that may apply to food, drinks or accommodation are not modelled. Confirm with the accountant before go-live.
-- **Marking the configuration verified:** the admin endpoint that sets `tax_config_status` to `verified` (system.admin, password re-entry, audited) is built in Stage 7. Until then the status stays provisional, and the Stage 26 go-live checklist requires it to be `verified`.
+- **Marking the configuration verified:** `PATCH /api/v1/settings` with `{"settings": {"tax_config_status": "verified"}}` (system.admin, password re-entry within 5 minutes) records who verified it and when (`tax_config_verified_by`, `tax_config_verified_at`) and writes the audit event `settings.tax_config_verified`. Changing a rate or active flag in `tax_rates`, or `tax_inclusive`, after verification returns the status to `provisional_unverified` (S-41). The Stage 26 go-live checklist requires `verified`. Do this only after every item in the checklist below is true.
 
 ## Go-live verification checklist (all items required)
 1. Confirm whether the business is VAT-registered, with its registration details. If it is not, the system must not be configured to add VAT.

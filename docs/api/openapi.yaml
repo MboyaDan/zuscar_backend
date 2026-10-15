@@ -748,6 +748,178 @@ paths:
                         is_protected: {type: boolean}
         '401': *id001
         '403': *id001
+  /api/v1/settings:
+    get:
+      summary: Read business settings
+      description: 'Any signed-in user. All settings are non-secret business configuration, including tax_config_status (provisional_unverified or verified) and, once verified, tax_config_verified_by and tax_config_verified_at.'
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: All settings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  settings:
+                    type: object
+                    additionalProperties: true
+        '401': *id001
+    patch:
+      summary: Change business settings
+      description: 'Needs permission system.admin. Needs a password entered in the last 5 minutes (error reauth_required otherwise). Audited with before and after values. Atomic: one invalid key changes nothing. Editable keys: business_name, address, phone, receipt_footer, timezone, tax_inclusive, negative_stock_policy (warn_override or block), checkin_time, checkout_time, idempotency_ttl_hours, tax_config_status. currency and the verification record cannot be changed. Setting tax_config_status to verified records who and when and is audited as settings.tax_config_verified. Changing tax_inclusive after verification returns the status to provisional_unverified.'
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - settings
+              properties:
+                settings:
+                  type: object
+                  additionalProperties: true
+      responses:
+        '200':
+          description: All settings after the change
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  settings:
+                    type: object
+                    additionalProperties: true
+        '400': *id001
+        '401': *id001
+        '403': *id001
+  /api/v1/tax-rates:
+    get:
+      summary: List tax categories
+      description: 'Any signed-in user. Treatment is standard, zero_rated or exempt; rate_bp is basis points.'
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: All categories
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TaxRate'
+        '401': *id001
+    post:
+      summary: Add a tax category
+      description: 'Needs permission system.admin. Needs a password entered in the last 5 minutes (error reauth_required otherwise). Audited with before and after values. The treatment is fixed at creation; zero_rated and exempt need rate_bp 0.'
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - code
+              - name
+              - rate_bp
+              - treatment
+              properties:
+                code: {type: string, pattern: '^[a-z][a-z0-9_]{1,39}$'}
+                name: {type: string}
+                rate_bp: {type: integer, minimum: 0, maximum: 10000}
+                treatment: {type: string, enum: [standard, zero_rated, exempt]}
+      responses:
+        '201':
+          description: The category
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tax_rate:
+                    $ref: '#/components/schemas/TaxRate'
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '409': *id001
+  /api/v1/tax-rates/{id}:
+    patch:
+      summary: Change a tax category
+      description: 'Needs permission system.admin. Needs a password entered in the last 5 minutes (error reauth_required otherwise). Audited with before and after values. Changing the rate or the active flag after verification returns tax_config_status to provisional_unverified.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: {type: string}
+                rate_bp: {type: integer, minimum: 0, maximum: 10000}
+                active: {type: boolean}
+      responses:
+        '200':
+          description: The category
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tax_rate:
+                    $ref: '#/components/schemas/TaxRate'
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+  /api/v1/audit-logs:
+    get:
+      summary: Read the audit trail, newest first
+      description: 'Needs permission audit.view. Security events (users, roles, permissions, sessions, settings, tax categories) are only returned to a system administrator or an Accountant / Auditor; everyone else with audit.view sees operational events only.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: action, in: query, schema: {type: string}}
+      - {name: entity_type, in: query, schema: {type: string}}
+      - {name: result, in: query, schema: {type: string, enum: [success, denied, failed]}}
+      - {name: actor_id, in: query, schema: {type: integer, format: int64}}
+      - {name: from, in: query, schema: {type: string, format: date-time}}
+      - {name: to, in: query, schema: {type: string, format: date-time}}
+      - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200}}
+      - {name: cursor, in: query, schema: {type: string}}
+      responses:
+        '200':
+          description: One page
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AuditEntry'
+                  next_cursor:
+                    type: string
+        '400': *id001
+        '401': *id001
+        '403': *id001
 components:
   securitySchemes:
     sessionCookie:
@@ -767,6 +939,31 @@ components:
         maxLength: 128
       description: Required on every route that creates money or stock effects (see routes.csv).
   schemas:
+    TaxRate:
+      type: object
+      properties:
+        id: {type: integer, format: int64}
+        code: {type: string}
+        name: {type: string}
+        rate_bp: {type: integer}
+        treatment: {type: string, enum: [standard, zero_rated, exempt]}
+        active: {type: boolean}
+    AuditEntry:
+      type: object
+      properties:
+        id: {type: integer, format: int64}
+        occurred_at: {type: string, format: date-time}
+        actor_user_id: {type: integer, format: int64, nullable: true}
+        actor_label: {type: string}
+        action: {type: string}
+        entity_type: {type: string}
+        entity_id: {type: string}
+        reason: {type: string}
+        result: {type: string}
+        before: {nullable: true}
+        after: {nullable: true}
+        request_id: {type: string}
+        ip: {type: string}
     Role:
       type: object
       properties:

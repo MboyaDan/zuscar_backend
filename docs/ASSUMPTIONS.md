@@ -10,7 +10,7 @@ Every default below keeps the build moving and must be confirmed with the client
 | Confirmed by the owner (Stage 7a) | S-34 (system.admin may grant any role; others only roles whose permissions they hold) |
 | Retained at the owner's instruction | S-15 (extra permission keys, seeded; conflict check found none) |
 | OPEN, tracked explicitly | S-17, S-18, S-21 (see OPEN_ITEMS.md) |
-| Default in use, awaiting confirmation | every other ID below: A-01 to A-08, DQ-01 to DQ-18, S-01 to S-12, S-14, S-16, S-19, S-20, S-22 to S-25, S-27 to S-33, S-35 to S-39 |
+| Default in use, awaiting confirmation | every other ID below: A-01 to A-08, DQ-01 to DQ-18, S-01 to S-12, S-14, S-16, S-19, S-20, S-22 to S-25, S-27 to S-33, S-35 to S-42 |
 
 ## Interpretations of instructions (not assumptions about the venue)
 | ID | Interpretation made | Stage |
@@ -100,3 +100,6 @@ Defaults chosen by the build to keep going. Each must be confirmed by the named 
 | S-37 | Password re-entry (S-16) is required to change roles, deactivate, reactivate, reset a password and delete a user. It is not required to create a user, edit a display name or set a PIN. Creating a user with roles is therefore not re-entry gated: tighten if the owner wants it | 7a | Owner |
 | S-38 | Protected roles (Super Admin) cannot be edited, have permissions changed or be deleted through the API, even by a system administrator, and `system.admin` cannot be granted through the API at all; changing either is a migration. This is stricter than `rbac.md` rule 1 and avoids an owner stripping their own recovery role. Anyone without `system.admin` can only add permissions they hold; removing is always allowed | 7b-1 | Owner |
 | S-39 | Every role create, edit, delete and permission change needs password re-entry (rule 6), including creating an empty role | 7b-1 | Owner |
+| S-40 | Audit log scope (`rbac.md` note 6): security events are those on users, sessions, roles, permissions, settings and tax categories. They are shown to a holder of `system.admin` or the `accountant_auditor` role; any other holder of `audit.view` sees operational events only. The role code `accountant_auditor` is named in code | 7b-2 | Owner |
+| S-41 | A tax category's treatment cannot change after creation (create a new category instead). Changing a rate, a category's active flag, or `tax_inclusive` after the tax configuration was marked verified returns `tax_config_status` to `provisional_unverified`, because the verification covered the old values. Renaming does not | 7b-2 | Owner |
+| S-42 | `negative_stock_policy` accepts `warn_override` (the default) and `block`; other values are refused until the inventory stage defines them. `currency` is fixed at KES and is not editable | 7b-2 | Owner |

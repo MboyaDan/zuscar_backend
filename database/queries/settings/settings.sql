@@ -14,3 +14,20 @@ RETURNING id;
 -- name: CreateCounterIfMissing :exec
 INSERT INTO document_counters (doc_type, scope, prefix, next_value) VALUES ($1, '', $2, $3)
 ON CONFLICT (doc_type, scope) DO NOTHING;
+
+-- ---- Stage 7b: settings and tax category administration ----
+
+-- name: ListSettings :many
+SELECT key, value, updated_at FROM system_settings ORDER BY key;
+
+-- name: ListTaxRates :many
+SELECT id, code, name, rate_bp, treatment, active, created_at FROM tax_rates ORDER BY id;
+
+-- name: GetTaxRate :one
+SELECT id, code, name, rate_bp, treatment, active, created_at FROM tax_rates WHERE id = $1;
+
+-- name: CreateTaxRate :one
+INSERT INTO tax_rates (code, name, rate_bp, treatment) VALUES ($1, $2, $3, $4) RETURNING id;
+
+-- name: UpdateTaxRate :exec
+UPDATE tax_rates SET name = $2, rate_bp = $3, active = $4 WHERE id = $1;
