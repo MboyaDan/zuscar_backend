@@ -29,6 +29,7 @@ func (h *Handler) RegisterAdmin(v1 *gin.RouterGroup) {
 	u.POST("/:id/reset-password", h.requirePermission("users.update"), h.resetPassword)
 	u.PUT("/:id/pin", h.requirePermission("users.update"), h.setPIN)
 	u.DELETE("/:id", h.requirePermission("users.delete"), h.deleteUser)
+	h.registerRoles(v1)
 }
 
 // requirePermission answers 403 when the signed-in user lacks the permission (401 is handled by Authenticate).
@@ -253,6 +254,14 @@ func (h *Handler) adminError(c *gin.Context, err error) {
 		zhttp.WriteError(c, http.StatusForbidden, "protected_account", err.Error()+".")
 	case errors.Is(err, service.ErrEscalation):
 		zhttp.WriteError(c, http.StatusForbidden, "escalation_refused", err.Error()+".")
+	case errors.Is(err, service.ErrProtectedRole), errors.Is(err, service.ErrProtectedPermission):
+		zhttp.WriteError(c, http.StatusForbidden, "protected_role", err.Error()+".")
+	case errors.Is(err, service.ErrRoleNotFound):
+		zhttp.WriteError(c, http.StatusNotFound, "not_found", "That role does not exist.")
+	case errors.Is(err, service.ErrRoleCodeTaken):
+		zhttp.WriteError(c, http.StatusConflict, "role_code_taken", "That role code is already in use.", zhttp.FieldError{Field: "code", Message: "is already in use"})
+	case errors.Is(err, service.ErrRoleInUse):
+		zhttp.WriteError(c, http.StatusConflict, "role_in_use", err.Error()+".")
 	case errors.Is(err, service.ErrUserNotFound):
 		zhttp.WriteError(c, http.StatusNotFound, "not_found", "That user does not exist.")
 	case errors.Is(err, service.ErrUsernameTaken):

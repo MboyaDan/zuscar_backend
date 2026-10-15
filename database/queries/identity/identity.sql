@@ -191,3 +191,38 @@ DELETE FROM user_pins WHERE user_id = $1;
 
 -- name: DeleteUser :exec
 DELETE FROM users WHERE id = $1;
+
+-- ---- Stage 7b: role and permission administration ----
+
+-- name: ListRoles :many
+SELECT r.id, r.code, r.name, r.description, r.is_protected, r.is_template,
+       COALESCE((SELECT array_agg(p.key ORDER BY p.key) FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id WHERE rp.role_id = r.id), '{}')::text[] AS permission_keys,
+       (SELECT count(*) FROM user_roles ur WHERE ur.role_id = r.id)::int AS user_count
+FROM roles r ORDER BY r.id;
+
+-- name: GetRole :one
+SELECT r.id, r.code, r.name, r.description, r.is_protected, r.is_template,
+       COALESCE((SELECT array_agg(p.key ORDER BY p.key) FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id WHERE rp.role_id = r.id), '{}')::text[] AS permission_keys,
+       (SELECT count(*) FROM user_roles ur WHERE ur.role_id = r.id)::int AS user_count
+FROM roles r WHERE r.id = $1;
+
+-- name: ListPermissions :many
+SELECT id, key, description, is_protected FROM permissions ORDER BY key;
+
+-- name: ListPermissionsByKeys :many
+SELECT id, key, is_protected FROM permissions WHERE key = ANY(sqlc.arg(keys)::text[]) ORDER BY key;
+
+-- name: CreateRole :one
+INSERT INTO roles (code, name, description) VALUES ($1, $2, $3) RETURNING id;
+
+-- name: UpdateRoleText :exec
+UPDATE roles SET name = $2, description = $3 WHERE id = $1;
+
+-- name: DeleteRole :exec
+DELETE FROM roles WHERE id = $1;
+
+-- name: RevokeRolePermission :exec
+DELETE FROM role_permissions WHERE role_id = $1 AND permission_id = $2;
+
+-- name: ListUsersWithRole :many
+SELECT u.id, u.username FROM user_roles ur JOIN users u ON u.id = ur.user_id WHERE ur.role_id = $1 ORDER BY u.username;

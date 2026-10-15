@@ -111,6 +111,23 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const createRole = `-- name: CreateRole :one
+INSERT INTO roles (code, name, description) VALUES ($1, $2, $3) RETURNING id
+`
+
+type CreateRoleParams struct {
+	Code        string
+	Name        string
+	Description string
+}
+
+func (q *Queries) CreateRole(ctx context.Context, arg CreateRoleParams) (int64, error) {
+	row := q.db.QueryRow(ctx, createRole, arg.Code, arg.Name, arg.Description)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const createSession = `-- name: CreateSession :one
 INSERT INTO sessions (user_id, token_hash, csrf_hash, auth_method, created_at, last_seen_at, idle_expires_at, absolute_expires_at, ip, user_agent)
 VALUES ($1, $2, $3, $4, $5, $5, $6, $7, $8, $9) RETURNING id
@@ -185,6 +202,15 @@ func (q *Queries) DeactivateUser(ctx context.Context, arg DeactivateUserParams) 
 	return err
 }
 
+const deleteRole = `-- name: DeleteRole :exec
+DELETE FROM roles WHERE id = $1
+`
+
+func (q *Queries) DeleteRole(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, deleteRole, id)
+	return err
+}
+
 const deleteUser = `-- name: DeleteUser :exec
 DELETE FROM users WHERE id = $1
 `
@@ -231,6 +257,40 @@ func (q *Queries) GetPIN(ctx context.Context, userID int64) (GetPINRow, error) {
 		&i.PinHash,
 		&i.FailedCount,
 		&i.LockedUntil,
+	)
+	return i, err
+}
+
+const getRole = `-- name: GetRole :one
+SELECT r.id, r.code, r.name, r.description, r.is_protected, r.is_template,
+       COALESCE((SELECT array_agg(p.key ORDER BY p.key) FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id WHERE rp.role_id = r.id), '{}')::text[] AS permission_keys,
+       (SELECT count(*) FROM user_roles ur WHERE ur.role_id = r.id)::int AS user_count
+FROM roles r WHERE r.id = $1
+`
+
+type GetRoleRow struct {
+	ID             int64
+	Code           string
+	Name           string
+	Description    string
+	IsProtected    bool
+	IsTemplate     bool
+	PermissionKeys []string
+	UserCount      int32
+}
+
+func (q *Queries) GetRole(ctx context.Context, id int64) (GetRoleRow, error) {
+	row := q.db.QueryRow(ctx, getRole, id)
+	var i GetRoleRow
+	err := row.Scan(
+		&i.ID,
+		&i.Code,
+		&i.Name,
+		&i.Description,
+		&i.IsProtected,
+		&i.IsTemplate,
+		&i.PermissionKeys,
+		&i.UserCount,
 	)
 	return i, err
 }
@@ -574,6 +634,114 @@ func (q *Queries) ListPermissionKeysForUser(ctx context.Context, userID int64) (
 	return items, nil
 }
 
+const listPermissions = `-- name: ListPermissions :many
+SELECT id, key, description, is_protected FROM permissions ORDER BY key
+`
+
+func (q *Queries) ListPermissions(ctx context.Context) ([]Permission, error) {
+	rows, err := q.db.Query(ctx, listPermissions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Permission
+	for rows.Next() {
+		var i Permission
+		if err := rows.Scan(
+			&i.ID,
+			&i.Key,
+			&i.Description,
+			&i.IsProtected,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPermissionsByKeys = `-- name: ListPermissionsByKeys :many
+SELECT id, key, is_protected FROM permissions WHERE key = ANY($1::text[]) ORDER BY key
+`
+
+type ListPermissionsByKeysRow struct {
+	ID          int64
+	Key         string
+	IsProtected bool
+}
+
+func (q *Queries) ListPermissionsByKeys(ctx context.Context, keys []string) ([]ListPermissionsByKeysRow, error) {
+	rows, err := q.db.Query(ctx, listPermissionsByKeys, keys)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPermissionsByKeysRow
+	for rows.Next() {
+		var i ListPermissionsByKeysRow
+		if err := rows.Scan(&i.ID, &i.Key, &i.IsProtected); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRoles = `-- name: ListRoles :many
+
+SELECT r.id, r.code, r.name, r.description, r.is_protected, r.is_template,
+       COALESCE((SELECT array_agg(p.key ORDER BY p.key) FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id WHERE rp.role_id = r.id), '{}')::text[] AS permission_keys,
+       (SELECT count(*) FROM user_roles ur WHERE ur.role_id = r.id)::int AS user_count
+FROM roles r ORDER BY r.id
+`
+
+type ListRolesRow struct {
+	ID             int64
+	Code           string
+	Name           string
+	Description    string
+	IsProtected    bool
+	IsTemplate     bool
+	PermissionKeys []string
+	UserCount      int32
+}
+
+// ---- Stage 7b: role and permission administration ----
+func (q *Queries) ListRoles(ctx context.Context) ([]ListRolesRow, error) {
+	rows, err := q.db.Query(ctx, listRoles)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRolesRow
+	for rows.Next() {
+		var i ListRolesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Code,
+			&i.Name,
+			&i.Description,
+			&i.IsProtected,
+			&i.IsTemplate,
+			&i.PermissionKeys,
+			&i.UserCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRolesByCodes = `-- name: ListRolesByCodes :many
 SELECT id, code, name, is_protected FROM roles WHERE code = ANY($1::text[]) ORDER BY code
 `
@@ -764,6 +932,35 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUse
 	return items, nil
 }
 
+const listUsersWithRole = `-- name: ListUsersWithRole :many
+SELECT u.id, u.username FROM user_roles ur JOIN users u ON u.id = ur.user_id WHERE ur.role_id = $1 ORDER BY u.username
+`
+
+type ListUsersWithRoleRow struct {
+	ID       int64
+	Username string
+}
+
+func (q *Queries) ListUsersWithRole(ctx context.Context, roleID int64) ([]ListUsersWithRoleRow, error) {
+	rows, err := q.db.Query(ctx, listUsersWithRole, roleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUsersWithRoleRow
+	for rows.Next() {
+		var i ListUsersWithRoleRow
+		if err := rows.Scan(&i.ID, &i.Username); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const pruneLoginAttempts = `-- name: PruneLoginAttempts :exec
 DELETE FROM login_attempts WHERE attempted_at < $1
 `
@@ -907,6 +1104,20 @@ func (q *Queries) RevokeOtherSessions(ctx context.Context, arg RevokeOtherSessio
 	return err
 }
 
+const revokeRolePermission = `-- name: RevokeRolePermission :exec
+DELETE FROM role_permissions WHERE role_id = $1 AND permission_id = $2
+`
+
+type RevokeRolePermissionParams struct {
+	RoleID       int64
+	PermissionID int64
+}
+
+func (q *Queries) RevokeRolePermission(ctx context.Context, arg RevokeRolePermissionParams) error {
+	_, err := q.db.Exec(ctx, revokeRolePermission, arg.RoleID, arg.PermissionID)
+	return err
+}
+
 const revokeSession = `-- name: RevokeSession :exec
 UPDATE sessions SET revoked_at = $2, revoke_reason = $3 WHERE id = $1 AND revoked_at IS NULL
 `
@@ -977,6 +1188,21 @@ type UpdateDisplayNameParams struct {
 
 func (q *Queries) UpdateDisplayName(ctx context.Context, arg UpdateDisplayNameParams) error {
 	_, err := q.db.Exec(ctx, updateDisplayName, arg.ID, arg.DisplayName)
+	return err
+}
+
+const updateRoleText = `-- name: UpdateRoleText :exec
+UPDATE roles SET name = $2, description = $3 WHERE id = $1
+`
+
+type UpdateRoleTextParams struct {
+	ID          int64
+	Name        string
+	Description string
+}
+
+func (q *Queries) UpdateRoleText(ctx context.Context, arg UpdateRoleTextParams) error {
+	_, err := q.db.Exec(ctx, updateRoleText, arg.ID, arg.Name, arg.Description)
 	return err
 }
 
