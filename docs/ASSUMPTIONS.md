@@ -2,14 +2,15 @@
 
 Every default below keeps the build moving and must be confirmed with the client before go-live. Stage = where it was first adopted.
 
-## Confirmation status (updated after Stage 6)
+## Confirmation status (updated after Stage 7a)
 | Status | IDs |
 |---|---|
 | Confirmed by the owner | S-13 (Business Manager does not hold roles.manage or permissions.assign) |
 | Changed by owner instruction | S-26 (tax rate default 1600 is provisional; open item T-01 is a go-live blocker) |
+| Confirmed by the owner (Stage 7a) | S-34 (system.admin may grant any role; others only roles whose permissions they hold) |
 | Retained at the owner's instruction | S-15 (extra permission keys, seeded; conflict check found none) |
 | OPEN, tracked explicitly | S-17, S-18, S-21 (see OPEN_ITEMS.md) |
-| Default in use, awaiting confirmation | every other ID below: A-01 to A-08, DQ-01 to DQ-18, S-01 to S-12, S-14, S-16, S-19, S-20, S-22 to S-25, S-27 to S-33 |
+| Default in use, awaiting confirmation | every other ID below: A-01 to A-08, DQ-01 to DQ-18, S-01 to S-12, S-14, S-16, S-19, S-20, S-22 to S-25, S-27 to S-33, S-35 to S-37 |
 
 ## Interpretations of instructions (not assumptions about the venue)
 | ID | Interpretation made | Stage |
@@ -93,4 +94,7 @@ Defaults chosen by the build to keep going. Each must be confirmed by the named 
 | S-31 | PIN fast-switch: 4 to 8 digits, not all the same and not a run (1234, 4321); only users whose roles are all among cashier, waiter, bartender; 5 wrong PINs lock it for 15 minutes; the new session can never outlive the session it replaces; a PIN session cannot do password re-entry | 6 | Owner |
 | S-32 | Per-IP failed-login limit 50 per 15 minutes; proxy headers are ignored (TRUSTED_PROXIES empty) until the real Vercel and Render proxy addresses are verified on the deployed stack (Stage 25) | 6 | Owner (technical) |
 | S-33 | Session idle expiry is extended at most once per minute; password re-entry for sensitive actions stays valid for 5 minutes (S-16) | 6 | Owner |
-
+| S-34 | The no-escalation rule (`rbac.md` section 3, rule 2) applies to everyone except holders of `system.admin`: a Super Admin may grant any role, because the same person can already edit any role. Everyone else can only grant a role whose permissions they all hold, and protected roles only if they hold `system.admin`. Consequence: a Business Manager can assign cashier and waiter but not a role carrying `roles.manage` | 7a | Owner |
+| S-35 | A username never changes after creation (it is the login and audit identity); `PATCH /users/{id}` edits the display name only | 7a | Owner |
+| S-36 | The admin routes refuse self-service on your own account (deactivate, change roles, delete, reset password) with 409 `self_action_refused`; the password is changed through `change-password`. This stops an administrator locking themselves out | 7a | Owner |
+| S-37 | Password re-entry (S-16) is required to change roles, deactivate, reactivate, reset a password and delete a user. It is not required to create a user, edit a display name or set a PIN. Creating a user with roles is therefore not re-entry gated: tighten if the owner wants it | 7a | Owner |

@@ -257,6 +257,316 @@ paths:
                 pin:
                   type: string
                   pattern: ^[0-9]{4,8}$
+  /api/v1/users:
+    get:
+      summary: List users
+      description: 'Needs permission users.update. Keyset paging: limit (1 to 200, default 50) and the opaque cursor from next_cursor. q matches a username prefix or part of a display name.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: status, in: query, schema: {type: string, enum: [active, inactive]}}
+      - {name: q, in: query, schema: {type: string}}
+      - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200}}
+      - {name: cursor, in: query, schema: {type: string}}
+      responses:
+        '200':
+          description: One page
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+                  next_cursor:
+                    type: string
+        '400': *id001
+        '401': *id001
+        '403': *id001
+    post:
+      summary: Create a user
+      description: 'Needs permission users.create. The account must change its password at first login. A role can only be granted by someone who holds its permissions, or by a system administrator. The password is never returned.'
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+              schema:
+                type: object
+                required:
+                - username
+                - display_name
+                - password
+                properties:
+                  username: {type: string}
+                  display_name: {type: string}
+                  password: {type: string}
+                  roles:
+                    type: array
+                    items:
+                      type: string
+      responses:
+        '201':
+          description: The user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '409': *id001
+  /api/v1/users/{id}:
+    get:
+      summary: Get one user
+      description: 'Needs permission users.update.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: The user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+        '401': *id001
+        '403': *id001
+        '404': *id001
+    patch:
+      summary: Change the display name
+      description: 'Needs permission users.update. The username never changes. Audited with before and after values.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+              schema:
+                type: object
+                required:
+                - display_name
+                properties:
+                  display_name: {type: string}
+      responses:
+        '200':
+          description: The user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+    delete:
+      summary: Delete a user with no history
+      description: 'Needs permission users.delete. Needs a password entered in the last 5 minutes (error reauth_required otherwise). Accounts that signed in, assigned a role or appear in the audit trail are refused with has_history: deactivate them instead.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      security:
+      - sessionCookie: []
+      responses:
+        '204':
+          description: Done
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/users/{id}/roles:
+    put:
+      summary: Replace the user's roles
+      description: 'Needs permission users.update. Needs a password entered in the last 5 minutes (error reauth_required otherwise). Errors: escalation_refused, protected_account, self_action_refused, last_super_admin.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+              schema:
+                type: object
+                required:
+                - roles
+                properties:
+                  roles:
+                    type: array
+                    items:
+                      type: string
+      responses:
+        '200':
+          description: The user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/users/{id}/deactivate:
+    post:
+      summary: Deactivate a user
+      description: 'Needs permission users.deactivate. Needs a password entered in the last 5 minutes (error reauth_required otherwise). Ends every session of the account in the same transaction. The last active Super Admin is refused (last_super_admin). Repeating is harmless.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+              schema:
+                type: object
+                properties:
+                  reason: {type: string}
+      responses:
+        '200':
+          description: The user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/users/{id}/reactivate:
+    post:
+      summary: Reactivate a user
+      description: 'Needs permission users.update. Needs a password entered in the last 5 minutes (error reauth_required otherwise).'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: The user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+        '401': *id001
+        '403': *id001
+        '404': *id001
+  /api/v1/users/{id}/reset-password:
+    post:
+      summary: Set a temporary password
+      description: 'Needs permission users.update. Needs a password entered in the last 5 minutes (error reauth_required otherwise). Forces a change at next login and ends all sessions of the account. Not for your own account (use change-password).'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+              schema:
+                type: object
+                required:
+                - new_password
+                properties:
+                  new_password: {type: string}
+      responses:
+        '204':
+          description: Done
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/users/{id}/pin:
+    put:
+      summary: Set a fast-switch PIN
+      description: 'Needs permission users.update. Floor roles only (A-07); 409 pin_not_allowed otherwise.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+              schema:
+                type: object
+                required:
+                - pin
+                properties:
+                  pin: {type: string, pattern: '^[0-9]{4,8}$'}
+      responses:
+        '204':
+          description: Done
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
 components:
   securitySchemes:
     sessionCookie:
@@ -276,6 +586,20 @@ components:
         maxLength: 128
       description: Required on every route that creates money or stock effects (see routes.csv).
   schemas:
+    User:
+      type: object
+      properties:
+        id: {type: integer, format: int64}
+        username: {type: string}
+        display_name: {type: string}
+        status: {type: string, enum: [active, inactive]}
+        must_change_password: {type: boolean}
+        last_login_at: {type: string, format: date-time, nullable: true}
+        created_at: {type: string, format: date-time}
+        deactivated_at: {type: string, format: date-time, nullable: true}
+        roles:
+          type: array
+          items: {type: string}
     ErrorBody:
       type: object
       required:

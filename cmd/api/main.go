@@ -55,6 +55,7 @@ func main() {
 				return err
 			}
 			h.Register(v1)
+			h.RegisterAdmin(v1)
 			return nil
 		}
 	} else {

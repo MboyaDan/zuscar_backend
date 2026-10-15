@@ -171,6 +171,47 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (int64, 
 	return id, err
 }
 
+const deactivateUser = `-- name: DeactivateUser :exec
+UPDATE users SET status = 'inactive', deactivated_at = $2 WHERE id = $1
+`
+
+type DeactivateUserParams struct {
+	ID            int64
+	DeactivatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) DeactivateUser(ctx context.Context, arg DeactivateUserParams) error {
+	_, err := q.db.Exec(ctx, deactivateUser, arg.ID, arg.DeactivatedAt)
+	return err
+}
+
+const deleteUser = `-- name: DeleteUser :exec
+DELETE FROM users WHERE id = $1
+`
+
+func (q *Queries) DeleteUser(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, deleteUser, id)
+	return err
+}
+
+const deleteUserPIN = `-- name: DeleteUserPIN :exec
+DELETE FROM user_pins WHERE user_id = $1
+`
+
+func (q *Queries) DeleteUserPIN(ctx context.Context, userID int64) error {
+	_, err := q.db.Exec(ctx, deleteUserPIN, userID)
+	return err
+}
+
+const deleteUserRoles = `-- name: DeleteUserRoles :exec
+DELETE FROM user_roles WHERE user_id = $1
+`
+
+func (q *Queries) DeleteUserRoles(ctx context.Context, userID int64) error {
+	_, err := q.db.Exec(ctx, deleteUserRoles, userID)
+	return err
+}
+
 const getPIN = `-- name: GetPIN :one
 SELECT user_id, pin_hash, failed_count, locked_until FROM user_pins WHERE user_id = $1
 `
@@ -338,6 +379,45 @@ func (q *Queries) GetUserForLogin(ctx context.Context, username string) (GetUser
 	return i, err
 }
 
+const getUserSummary = `-- name: GetUserSummary :one
+SELECT u.id, u.username, u.display_name, u.status, u.must_change_password, u.last_login_at, u.created_at, u.deactivated_at,
+       COALESCE(array_agg(r.code ORDER BY r.code) FILTER (WHERE r.code IS NOT NULL), '{}')::text[] AS role_codes
+FROM users u
+LEFT JOIN user_roles ur ON ur.user_id = u.id
+LEFT JOIN roles r ON r.id = ur.role_id
+WHERE u.id = $1
+GROUP BY u.id
+`
+
+type GetUserSummaryRow struct {
+	ID                 int64
+	Username           string
+	DisplayName        string
+	Status             string
+	MustChangePassword bool
+	LastLoginAt        pgtype.Timestamptz
+	CreatedAt          pgtype.Timestamptz
+	DeactivatedAt      pgtype.Timestamptz
+	RoleCodes          []string
+}
+
+func (q *Queries) GetUserSummary(ctx context.Context, id int64) (GetUserSummaryRow, error) {
+	row := q.db.QueryRow(ctx, getUserSummary, id)
+	var i GetUserSummaryRow
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.DisplayName,
+		&i.Status,
+		&i.MustChangePassword,
+		&i.LastLoginAt,
+		&i.CreatedAt,
+		&i.DeactivatedAt,
+		&i.RoleCodes,
+	)
+	return i, err
+}
+
 const grantRolePermission = `-- name: GrantRolePermission :exec
 INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2) ON CONFLICT DO NOTHING
 `
@@ -443,6 +523,30 @@ func (q *Queries) InsertLoginAttempt(ctx context.Context, arg InsertLoginAttempt
 	return err
 }
 
+const listPermissionKeysForRole = `-- name: ListPermissionKeysForRole :many
+SELECT p.key FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id WHERE rp.role_id = $1 ORDER BY p.key
+`
+
+func (q *Queries) ListPermissionKeysForRole(ctx context.Context, roleID int64) ([]string, error) {
+	rows, err := q.db.Query(ctx, listPermissionKeysForRole, roleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		items = append(items, key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPermissionKeysForUser = `-- name: ListPermissionKeysForUser :many
 SELECT DISTINCT p.key FROM user_roles ur
 JOIN role_permissions rp ON rp.role_id = ur.role_id
@@ -463,6 +567,42 @@ func (q *Queries) ListPermissionKeysForUser(ctx context.Context, userID int64) (
 			return nil, err
 		}
 		items = append(items, key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRolesByCodes = `-- name: ListRolesByCodes :many
+SELECT id, code, name, is_protected FROM roles WHERE code = ANY($1::text[]) ORDER BY code
+`
+
+type ListRolesByCodesRow struct {
+	ID          int64
+	Code        string
+	Name        string
+	IsProtected bool
+}
+
+func (q *Queries) ListRolesByCodes(ctx context.Context, codes []string) ([]ListRolesByCodesRow, error) {
+	rows, err := q.db.Query(ctx, listRolesByCodes, codes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRolesByCodesRow
+	for rows.Next() {
+		var i ListRolesByCodesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Code,
+			&i.Name,
+			&i.IsProtected,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -499,6 +639,36 @@ func (q *Queries) ListRolesForUser(ctx context.Context, userID int64) ([]ListRol
 	return items, nil
 }
 
+const listUserRoleDetails = `-- name: ListUserRoleDetails :many
+SELECT r.id, r.code, r.is_protected FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = $1 ORDER BY r.code
+`
+
+type ListUserRoleDetailsRow struct {
+	ID          int64
+	Code        string
+	IsProtected bool
+}
+
+func (q *Queries) ListUserRoleDetails(ctx context.Context, userID int64) ([]ListUserRoleDetailsRow, error) {
+	rows, err := q.db.Query(ctx, listUserRoleDetails, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUserRoleDetailsRow
+	for rows.Next() {
+		var i ListUserRoleDetailsRow
+		if err := rows.Scan(&i.ID, &i.Code, &i.IsProtected); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUsernamesNotDev = `-- name: ListUsernamesNotDev :many
 SELECT username FROM users WHERE username NOT LIKE 'dev.%' ORDER BY username
 `
@@ -523,12 +693,92 @@ func (q *Queries) ListUsernamesNotDev(ctx context.Context) ([]string, error) {
 	return items, nil
 }
 
+const listUsers = `-- name: ListUsers :many
+
+SELECT u.id, u.username, u.display_name, u.status, u.must_change_password, u.last_login_at, u.created_at, u.deactivated_at,
+       COALESCE(array_agg(r.code ORDER BY r.code) FILTER (WHERE r.code IS NOT NULL), '{}')::text[] AS role_codes
+FROM users u
+LEFT JOIN user_roles ur ON ur.user_id = u.id
+LEFT JOIN roles r ON r.id = ur.role_id
+WHERE u.id > $1::bigint
+  AND ($2::text = '' OR u.status = $2::text)
+  AND ($3::text = '' OR u.username LIKE $3::text || '%' ESCAPE '\'
+       OR lower(u.display_name) LIKE '%' || lower($3::text) || '%' ESCAPE '\')
+GROUP BY u.id
+ORDER BY u.id
+LIMIT $4::int
+`
+
+type ListUsersParams struct {
+	AfterID      int64
+	StatusFilter string
+	Search       string
+	RowLimit     int32
+}
+
+type ListUsersRow struct {
+	ID                 int64
+	Username           string
+	DisplayName        string
+	Status             string
+	MustChangePassword bool
+	LastLoginAt        pgtype.Timestamptz
+	CreatedAt          pgtype.Timestamptz
+	DeactivatedAt      pgtype.Timestamptz
+	RoleCodes          []string
+}
+
+// ---- Stage 7: user administration ----
+func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error) {
+	rows, err := q.db.Query(ctx, listUsers,
+		arg.AfterID,
+		arg.StatusFilter,
+		arg.Search,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUsersRow
+	for rows.Next() {
+		var i ListUsersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.DisplayName,
+			&i.Status,
+			&i.MustChangePassword,
+			&i.LastLoginAt,
+			&i.CreatedAt,
+			&i.DeactivatedAt,
+			&i.RoleCodes,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const pruneLoginAttempts = `-- name: PruneLoginAttempts :exec
 DELETE FROM login_attempts WHERE attempted_at < $1
 `
 
 func (q *Queries) PruneLoginAttempts(ctx context.Context, attemptedAt pgtype.Timestamptz) error {
 	_, err := q.db.Exec(ctx, pruneLoginAttempts, attemptedAt)
+	return err
+}
+
+const reactivateUser = `-- name: ReactivateUser :exec
+UPDATE users SET status = 'active', deactivated_at = NULL, failed_login_count = 0, locked_until = NULL WHERE id = $1
+`
+
+func (q *Queries) ReactivateUser(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, reactivateUser, id)
 	return err
 }
 
@@ -595,6 +845,20 @@ type RecordSuccessfulLoginParams struct {
 
 func (q *Queries) RecordSuccessfulLogin(ctx context.Context, arg RecordSuccessfulLoginParams) error {
 	_, err := q.db.Exec(ctx, recordSuccessfulLogin, arg.ID, arg.LastLoginAt)
+	return err
+}
+
+const removeUserRole = `-- name: RemoveUserRole :exec
+DELETE FROM user_roles WHERE user_id = $1 AND role_id = $2
+`
+
+type RemoveUserRoleParams struct {
+	UserID int64
+	RoleID int64
+}
+
+func (q *Queries) RemoveUserRole(ctx context.Context, arg RemoveUserRoleParams) error {
+	_, err := q.db.Exec(ctx, removeUserRole, arg.UserID, arg.RoleID)
 	return err
 }
 
@@ -699,6 +963,20 @@ type TouchSessionParams struct {
 
 func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) error {
 	_, err := q.db.Exec(ctx, touchSession, arg.ID, arg.LastSeenAt, arg.IdleExpiresAt)
+	return err
+}
+
+const updateDisplayName = `-- name: UpdateDisplayName :exec
+UPDATE users SET display_name = $2 WHERE id = $1
+`
+
+type UpdateDisplayNameParams struct {
+	ID          int64
+	DisplayName string
+}
+
+func (q *Queries) UpdateDisplayName(ctx context.Context, arg UpdateDisplayNameParams) error {
+	_, err := q.db.Exec(ctx, updateDisplayName, arg.ID, arg.DisplayName)
 	return err
 }
 

@@ -1,6 +1,8 @@
 # Zuscar build progress
 
-## RESUME HERE (written after Stage 6; read this section first in a fresh chat)
+## RESUME HERE (written after Stage 7a; read this section first in a fresh chat)
+
+**Workflow update:** work is now delivered as per-repo patches from GitHub (`docs/claude/WORKFLOW.md`), not zips. Stage 7 is split: 7a (user administration, done, below) and 7b (roles, permissions, audit-logs, settings, tax-rates, tax-verified endpoint, AC-10 route-table test). The next stage is **7b**. Where the older text below says "zip" or "Stage 7", read it with this in mind. Latest CI seen by the owner: backend run on `f627361` succeeded (go and docker jobs).
 
 Master prompt and brief: `docs/system-requirements.docx` is the brief (source of truth for WHAT to build). The master prompt (stage protocol, honesty rules, design system) is not stored in the repo: ask the owner to paste it again, then apply section 2 below, which lists every change the owner made to it since. Stages 0 to 6 are done; the next one is Stage 7. Stop after each stage and wait for the owner to say "continue".
 
@@ -159,3 +161,9 @@ Stage 1 (architecture pack, docs only): no input needed from you.
 - **Decisions and assumptions:** S-26 revised; S-29 to S-33 added (ASSUMPTIONS.md); ADR-13 accepted.
 - **Next stage needs:** nothing blocking. Stage 7: permission middleware, user and role admin endpoints, Super Admin safeguards, audit writing, the tax-verification settings endpoint, and the AC-10, AC-11, AC-12 service tests.
 
+## Stage 7a: User administration (done, backend only)
+- **Built:** the ten `/users` routes (list with keyset paging, create, get, patch display name, roles, deactivate, reactivate, reset-password, PIN, delete); service-level permission checks plus route middleware; protected-account rule (only `system.admin` touches a Super Admin); no-escalation rule; password re-entry for roles, status, reset and delete; self-action refusal; deactivation revokes sessions in the same transaction; delete only for accounts with no history; audit rows with before and after values and no secrets; 13 sqlc queries; OpenAPI paths.
+- **Verified in the sandbox (PostgreSQL 16.15):** the new tests pass: `TestAC10_UserAdminRoutesDenyWithoutPermission`, `TestAC11_ManagerHasNoRoleAdminPermissions`, `TestAC11_ManagerCannotGrantOrTouchSuperAdmin`, `TestAC11_RoleGrantNeedsHeldPermissions`, `TestUserAdminLifecycle`, `TestReauthRequiredForSensitiveUserChanges`, `TestAC12_LastSuperAdminCannotBeRemoved`, `TestAC12_ConcurrentDeactivationLeavesOne` (5 rounds), `TestAC12_DeactivationKeepsHistory`. Mutation checks (guard removed) made the tests fail. OpenAPI validates.
+- **Decisions:** S-34 (approved by the owner: a Super Admin may grant any role; everyone else only roles whose permissions they hold), S-35 to S-37 (default in use).
+- **Not verified:** Docker and CI for this change; the service-level AC-11 test about a role administrator (needs the 7b role endpoints).
+- **Next stage needs:** nothing blocking. Stage 7b.

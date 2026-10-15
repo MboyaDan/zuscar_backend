@@ -136,3 +136,58 @@ UPDATE user_pins SET failed_count = 0, locked_until = NULL WHERE user_id = $1 AN
 INSERT INTO audit_logs (occurred_at, actor_user_id, actor_label, action, entity_type, entity_id, reason, result, before_json, after_json, request_id, ip)
 VALUES (sqlc.arg(occurred_at), sqlc.arg(actor_user_id), sqlc.arg(actor_label), sqlc.arg(action), sqlc.arg(entity_type), sqlc.arg(entity_id),
         sqlc.arg(reason), sqlc.arg(result), sqlc.arg(before_json), sqlc.arg(after_json), sqlc.arg(request_id), sqlc.arg(ip));
+
+-- ---- Stage 7: user administration ----
+
+-- name: ListUsers :many
+SELECT u.id, u.username, u.display_name, u.status, u.must_change_password, u.last_login_at, u.created_at, u.deactivated_at,
+       COALESCE(array_agg(r.code ORDER BY r.code) FILTER (WHERE r.code IS NOT NULL), '{}')::text[] AS role_codes
+FROM users u
+LEFT JOIN user_roles ur ON ur.user_id = u.id
+LEFT JOIN roles r ON r.id = ur.role_id
+WHERE u.id > sqlc.arg(after_id)::bigint
+  AND (sqlc.arg(status_filter)::text = '' OR u.status = sqlc.arg(status_filter)::text)
+  AND (sqlc.arg(search)::text = '' OR u.username LIKE sqlc.arg(search)::text || '%' ESCAPE '\'
+       OR lower(u.display_name) LIKE '%' || lower(sqlc.arg(search)::text) || '%' ESCAPE '\')
+GROUP BY u.id
+ORDER BY u.id
+LIMIT sqlc.arg(row_limit)::int;
+
+-- name: GetUserSummary :one
+SELECT u.id, u.username, u.display_name, u.status, u.must_change_password, u.last_login_at, u.created_at, u.deactivated_at,
+       COALESCE(array_agg(r.code ORDER BY r.code) FILTER (WHERE r.code IS NOT NULL), '{}')::text[] AS role_codes
+FROM users u
+LEFT JOIN user_roles ur ON ur.user_id = u.id
+LEFT JOIN roles r ON r.id = ur.role_id
+WHERE u.id = $1
+GROUP BY u.id;
+
+-- name: UpdateDisplayName :exec
+UPDATE users SET display_name = $2 WHERE id = $1;
+
+-- name: DeactivateUser :exec
+UPDATE users SET status = 'inactive', deactivated_at = $2 WHERE id = $1;
+
+-- name: ReactivateUser :exec
+UPDATE users SET status = 'active', deactivated_at = NULL, failed_login_count = 0, locked_until = NULL WHERE id = $1;
+
+-- name: ListRolesByCodes :many
+SELECT id, code, name, is_protected FROM roles WHERE code = ANY(sqlc.arg(codes)::text[]) ORDER BY code;
+
+-- name: ListUserRoleDetails :many
+SELECT r.id, r.code, r.is_protected FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = $1 ORDER BY r.code;
+
+-- name: ListPermissionKeysForRole :many
+SELECT p.key FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id WHERE rp.role_id = $1 ORDER BY p.key;
+
+-- name: RemoveUserRole :exec
+DELETE FROM user_roles WHERE user_id = $1 AND role_id = $2;
+
+-- name: DeleteUserRoles :exec
+DELETE FROM user_roles WHERE user_id = $1;
+
+-- name: DeleteUserPIN :exec
+DELETE FROM user_pins WHERE user_id = $1;
+
+-- name: DeleteUser :exec
+DELETE FROM users WHERE id = $1;

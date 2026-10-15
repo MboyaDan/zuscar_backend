@@ -100,6 +100,7 @@ func newEnv(t *testing.T, o ...envOpts) *testEnv {
 		t.Fatal(err)
 	}
 	h.Register(v1)
+	h.RegisterAdmin(v1)
 	// Probe routes stand in for ordinary protected endpoints that later stages add.
 	v1.GET("/_probe", h.Authenticate(false), func(c *gin.Context) { c.JSON(200, gin.H{"ok": true}) })
 	v1.GET("/_sensitive", h.Authenticate(false), h.RequireRecentReauth(), func(c *gin.Context) { c.JSON(200, gin.H{"ok": true}) })
