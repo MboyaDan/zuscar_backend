@@ -1,6 +1,6 @@
 # Open items and tracked decisions
 
-Updated at Stage 6. "Default in use" means the build proceeds on it; nothing here is confirmed until the Status says so.
+Updated at Stage 7a. S-34 was approved by the owner; S-35 to S-37 are defaults in use. "Default in use" means the build proceeds on it; nothing here is confirmed until the Status says so.
 
 ## Explicitly tracked by the owner
 | ID | Item | Default in use | Status |
