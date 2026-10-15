@@ -130,13 +130,16 @@ type auditEvent struct {
 	entityType       string
 	entityID, reason string
 	result           string // success | denied | failed
-	after            map[string]any
+	before, after    map[string]any
 }
 
 func (s *Service) audit(ctx context.Context, q *repository.Queries, now time.Time, ci ClientInfo, e auditEvent) error {
-	var after []byte
+	var before, after []byte
+	if e.before != nil {
+		before, _ = json.Marshal(e.before) // callers never put secrets in here
+	}
 	if e.after != nil {
-		after, _ = json.Marshal(e.after) // callers never put secrets in here
+		after, _ = json.Marshal(e.after)
 	}
 	if e.result == "" {
 		e.result = "success"
@@ -144,7 +147,7 @@ func (s *Service) audit(ctx context.Context, q *repository.Queries, now time.Tim
 	return q.InsertAuditFull(ctx, repository.InsertAuditFullParams{
 		OccurredAt: ts(now), ActorUserID: pgtype.Int8{Int64: e.actorID, Valid: e.actorID != 0}, ActorLabel: e.label,
 		Action: e.action, EntityType: e.entityType, EntityID: textOf(e.entityID), Reason: textOf(e.reason),
-		Result: e.result, AfterJson: after, RequestID: textOf(ci.RequestID), Ip: ci.IP,
+		Result: e.result, BeforeJson: before, AfterJson: after, RequestID: textOf(ci.RequestID), Ip: ci.IP,
 	})
 }
 
