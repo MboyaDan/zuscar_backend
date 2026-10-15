@@ -18,6 +18,8 @@ import (
 	"zuscar/backend/internal/platform/db"
 	zhttp "zuscar/backend/internal/platform/http"
 	"zuscar/backend/internal/platform/logging"
+	sethandler "zuscar/backend/internal/settings/handler"
+	setservice "zuscar/backend/internal/settings/service"
 )
 
 func main() {
@@ -56,6 +58,7 @@ func main() {
 			}
 			h.Register(v1)
 			h.RegisterAdmin(v1)
+			sethandler.New(setservice.New(pool, svc.Clock(), svc, svc.RecentReauth), log).Register(v1, h.Authenticate(false), h.CSRF())
 			return nil
 		}
 	} else {

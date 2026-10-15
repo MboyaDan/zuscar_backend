@@ -28,6 +28,29 @@ func (q *Queries) CreateCounterIfMissing(ctx context.Context, arg CreateCounterI
 	return err
 }
 
+const createTaxRate = `-- name: CreateTaxRate :one
+INSERT INTO tax_rates (code, name, rate_bp, treatment) VALUES ($1, $2, $3, $4) RETURNING id
+`
+
+type CreateTaxRateParams struct {
+	Code      string
+	Name      string
+	RateBp    int32
+	Treatment string
+}
+
+func (q *Queries) CreateTaxRate(ctx context.Context, arg CreateTaxRateParams) (int64, error) {
+	row := q.db.QueryRow(ctx, createTaxRate,
+		arg.Code,
+		arg.Name,
+		arg.RateBp,
+		arg.Treatment,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getSetting = `-- name: GetSetting :one
 SELECT value FROM system_settings WHERE key = $1
 `
@@ -37,6 +60,130 @@ func (q *Queries) GetSetting(ctx context.Context, key string) ([]byte, error) {
 	var value []byte
 	err := row.Scan(&value)
 	return value, err
+}
+
+const getTaxRate = `-- name: GetTaxRate :one
+SELECT id, code, name, rate_bp, treatment, active, created_at FROM tax_rates WHERE id = $1
+`
+
+type GetTaxRateRow struct {
+	ID        int64
+	Code      string
+	Name      string
+	RateBp    int32
+	Treatment string
+	Active    bool
+	CreatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) GetTaxRate(ctx context.Context, id int64) (GetTaxRateRow, error) {
+	row := q.db.QueryRow(ctx, getTaxRate, id)
+	var i GetTaxRateRow
+	err := row.Scan(
+		&i.ID,
+		&i.Code,
+		&i.Name,
+		&i.RateBp,
+		&i.Treatment,
+		&i.Active,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const listSettings = `-- name: ListSettings :many
+
+SELECT key, value, updated_at FROM system_settings ORDER BY key
+`
+
+type ListSettingsRow struct {
+	Key       string
+	Value     []byte
+	UpdatedAt pgtype.Timestamptz
+}
+
+// ---- Stage 7b: settings and tax category administration ----
+func (q *Queries) ListSettings(ctx context.Context) ([]ListSettingsRow, error) {
+	rows, err := q.db.Query(ctx, listSettings)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSettingsRow
+	for rows.Next() {
+		var i ListSettingsRow
+		if err := rows.Scan(&i.Key, &i.Value, &i.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTaxRates = `-- name: ListTaxRates :many
+SELECT id, code, name, rate_bp, treatment, active, created_at FROM tax_rates ORDER BY id
+`
+
+type ListTaxRatesRow struct {
+	ID        int64
+	Code      string
+	Name      string
+	RateBp    int32
+	Treatment string
+	Active    bool
+	CreatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ListTaxRates(ctx context.Context) ([]ListTaxRatesRow, error) {
+	rows, err := q.db.Query(ctx, listTaxRates)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTaxRatesRow
+	for rows.Next() {
+		var i ListTaxRatesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Code,
+			&i.Name,
+			&i.RateBp,
+			&i.Treatment,
+			&i.Active,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateTaxRate = `-- name: UpdateTaxRate :exec
+UPDATE tax_rates SET name = $2, rate_bp = $3, active = $4 WHERE id = $1
+`
+
+type UpdateTaxRateParams struct {
+	ID     int64
+	Name   string
+	RateBp int32
+	Active bool
+}
+
+func (q *Queries) UpdateTaxRate(ctx context.Context, arg UpdateTaxRateParams) error {
+	_, err := q.db.Exec(ctx, updateTaxRate,
+		arg.ID,
+		arg.Name,
+		arg.RateBp,
+		arg.Active,
+	)
+	return err
 }
 
 const upsertSetting = `-- name: UpsertSetting :exec

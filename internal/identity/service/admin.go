@@ -19,6 +19,7 @@ import (
 
 	"zuscar/backend/internal/identity/password"
 	"zuscar/backend/internal/identity/repository"
+	"zuscar/backend/internal/platform/audit"
 	"zuscar/backend/internal/platform/auth"
 )
 
@@ -582,3 +583,14 @@ func (s *Service) DeleteUser(ctx context.Context, actor *auth.Principal, id int6
 	}
 	return mapAdminDBError(err)
 }
+
+// Record lets other modules write audit rows inside their own transaction (platform/audit.Recorder).
+func (s *Service) Record(ctx context.Context, tx pgx.Tx, e audit.Entry) error {
+	return s.audit(ctx, repository.New(tx), s.clock.Now(), ClientInfo{IP: e.IP, RequestID: e.RequestID}, auditEvent{
+		actorID: e.ActorID, label: e.ActorLabel, action: e.Action, entityType: e.EntityType, entityID: e.EntityID,
+		reason: e.Reason, before: e.Before, after: e.After,
+	})
+}
+
+// Clock exposes the injected clock so modules that share the re-authentication window also share the time source.
+func (s *Service) Clock() Clock { return s.clock }
