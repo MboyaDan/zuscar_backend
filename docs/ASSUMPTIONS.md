@@ -10,7 +10,7 @@ Every default below keeps the build moving and must be confirmed with the client
 | Confirmed by the owner (Stage 7a) | S-34 (system.admin may grant any role; others only roles whose permissions they hold) |
 | Retained at the owner's instruction | S-15 (extra permission keys, seeded; conflict check found none) |
 | OPEN, tracked explicitly | S-17, S-18, S-21 (see OPEN_ITEMS.md) |
-| Default in use, awaiting confirmation | every other ID below: A-01 to A-08, DQ-01 to DQ-18, S-01 to S-12, S-14, S-16, S-19, S-20, S-22 to S-25, S-27 to S-33, S-35 to S-37 |
+| Default in use, awaiting confirmation | every other ID below: A-01 to A-08, DQ-01 to DQ-18, S-01 to S-12, S-14, S-16, S-19, S-20, S-22 to S-25, S-27 to S-33, S-35 to S-39 |
 
 ## Interpretations of instructions (not assumptions about the venue)
 | ID | Interpretation made | Stage |
@@ -98,3 +98,5 @@ Defaults chosen by the build to keep going. Each must be confirmed by the named 
 | S-35 | A username never changes after creation (it is the login and audit identity); `PATCH /users/{id}` edits the display name only | 7a | Owner |
 | S-36 | The admin routes refuse self-service on your own account (deactivate, change roles, delete, reset password) with 409 `self_action_refused`; the password is changed through `change-password`. This stops an administrator locking themselves out | 7a | Owner |
 | S-37 | Password re-entry (S-16) is required to change roles, deactivate, reactivate, reset a password and delete a user. It is not required to create a user, edit a display name or set a PIN. Creating a user with roles is therefore not re-entry gated: tighten if the owner wants it | 7a | Owner |
+| S-38 | Protected roles (Super Admin) cannot be edited, have permissions changed or be deleted through the API, even by a system administrator, and `system.admin` cannot be granted through the API at all; changing either is a migration. This is stricter than `rbac.md` rule 1 and avoids an owner stripping their own recovery role. Anyone without `system.admin` can only add permissions they hold; removing is always allowed | 7b-1 | Owner |
+| S-39 | Every role create, edit, delete and permission change needs password re-entry (rule 6), including creating an empty role | 7b-1 | Owner |

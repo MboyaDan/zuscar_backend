@@ -567,6 +567,187 @@ paths:
         '403': *id001
         '404': *id001
         '409': *id001
+  /api/v1/roles:
+    get:
+      summary: List roles with their permissions
+      description: 'Needs permission roles.manage.'
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: All roles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Role'
+        '401': *id001
+        '403': *id001
+    post:
+      summary: Create an empty role
+      description: 'Needs permission roles.manage. Needs a password entered in the last 5 minutes (error reauth_required otherwise). Audited with before and after values. Permissions are granted separately.'
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - code
+              - name
+              properties:
+                  code: {type: string, pattern: '^[a-z][a-z0-9_]{1,39}$'}
+                  name: {type: string}
+                  description: {type: string}
+      responses:
+        '201':
+          description: Result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  role:
+                    $ref: '#/components/schemas/Role'
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '409': *id001
+  /api/v1/roles/{id}:
+    patch:
+      summary: Change a role name and description
+      description: 'Needs permission roles.manage. Needs a password entered in the last 5 minutes (error reauth_required otherwise). Audited with before and after values. Protected roles are refused (protected_role). The code never changes.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - name
+              properties:
+                  name: {type: string}
+                  description: {type: string}
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  role:
+                    $ref: '#/components/schemas/Role'
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+    delete:
+      summary: Delete an unassigned role
+      description: 'Needs permission roles.manage. Needs a password entered in the last 5 minutes (error reauth_required otherwise). Audited with before and after values. Refused while the role is assigned (role_in_use) and always for protected roles.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      security:
+      - sessionCookie: []
+      responses:
+        '204':
+          description: Done
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/roles/{id}/permissions:
+    put:
+      summary: Replace a role's permission set
+      description: 'Needs permission permissions.assign. Needs a password entered in the last 5 minutes (error reauth_required otherwise). Audited with before and after values. system.admin is refused for everyone and protected roles are refused. Without system.admin you can only add permissions you hold (escalation_refused). The response lists the users affected; changes apply on their next request.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - permissions
+              properties:
+                  permissions:
+                    type: array
+                    items:
+                      type: string
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  role:
+                    $ref: '#/components/schemas/Role'
+                  affected_users:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {type: integer, format: int64}
+                        username: {type: string}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+  /api/v1/permissions:
+    get:
+      summary: List permissions
+      description: 'Needs permission roles.manage.'
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: All permissions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {type: integer, format: int64}
+                        key: {type: string}
+                        description: {type: string}
+                        is_protected: {type: boolean}
+        '401': *id001
+        '403': *id001
 components:
   securitySchemes:
     sessionCookie:
@@ -586,6 +767,19 @@ components:
         maxLength: 128
       description: Required on every route that creates money or stock effects (see routes.csv).
   schemas:
+    Role:
+      type: object
+      properties:
+        id: {type: integer, format: int64}
+        code: {type: string}
+        name: {type: string}
+        description: {type: string}
+        is_protected: {type: boolean}
+        is_template: {type: boolean}
+        permissions:
+          type: array
+          items: {type: string}
+        user_count: {type: integer}
     User:
       type: object
       properties:

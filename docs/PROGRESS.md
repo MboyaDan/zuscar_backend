@@ -167,3 +167,9 @@ Stage 1 (architecture pack, docs only): no input needed from you.
 - **Decisions:** S-34 (approved by the owner: a Super Admin may grant any role; everyone else only roles whose permissions they hold), S-35 to S-37 (default in use).
 - **Not verified:** Docker and CI for this change; the service-level AC-11 test about a role administrator (needs the 7b role endpoints).
 - **Next stage needs:** nothing blocking. Stage 7b.
+
+## Stage 7b-1: Roles and permissions (done, backend only)
+- **Built:** `GET/POST /roles`, `PATCH/DELETE /roles/{id}`, `PUT /roles/{id}/permissions`, `GET /permissions`; protected roles and `system.admin` untouchable; no-escalation for permission grants; password re-entry and audit with before/after; affected users returned; 9 sqlc queries; OpenAPI paths.
+- **Verified in the sandbox:** `TestRoleAdminLifecycle`, `TestAC11_RoleAdminWithoutSystemAdminCannotGrantIt`; mutation checks (escalation, protected permission, protected role) make them fail. CI for Stage 7a was reported green (go and docker jobs) by the owner.
+- **Decisions to confirm:** S-38, S-39.
+- **Next:** Stage 7b-2: settings, tax-rates, the tax-verified status change, audit-logs (security vs operational scope), and `TestAC10_EveryProtectedRouteDeniesWithoutPermission` over `routes.csv`.
