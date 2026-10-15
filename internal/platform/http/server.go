@@ -20,6 +20,7 @@ type Deps struct {
 	DB              Pinger
 	MaxRequestBytes int64
 	Production      bool
+	TrustedProxies  []string // empty = trust nobody; the client IP is then the direct peer
 }
 
 // NewRouter builds the engine with the middleware chain from architecture.md section 4.
@@ -30,7 +31,12 @@ func NewRouter(d Deps) (*gin.Engine, *gin.RouterGroup) {
 	}
 	r := gin.New()
 	r.HandleMethodNotAllowed = true
-	_ = r.SetTrustedProxies(nil) // real client IP handling is decided with rate limiting (Stage 6)
+	// Behind Vercel and Render the direct peer is a proxy, so per-IP limits only mean something once the real
+	// proxy addresses are listed in TRUSTED_PROXIES (verify on the deployed stack, Stage 25).
+	if err := r.SetTrustedProxies(d.TrustedProxies); err != nil {
+		d.Logger.Error("invalid TRUSTED_PROXIES, trusting nobody", "error", err.Error())
+		_ = r.SetTrustedProxies(nil)
+	}
 	r.Use(RequestID(), AccessLog(d.Logger), Recovery(d.Logger), SecurityHeaders(), BodyLimit(d.MaxRequestBytes))
 	r.NoRoute(notFound)
 	r.NoMethod(methodNotAllowed)

@@ -56,19 +56,25 @@ func (q *Queries) UpsertSetting(ctx context.Context, arg UpsertSettingParams) er
 }
 
 const upsertTaxRate = `-- name: UpsertTaxRate :one
-INSERT INTO tax_rates (code, name, rate_bp) VALUES ($1, $2, $3)
-ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, rate_bp = EXCLUDED.rate_bp
+INSERT INTO tax_rates (code, name, rate_bp, treatment) VALUES ($1, $2, $3, $4)
+ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, rate_bp = EXCLUDED.rate_bp, treatment = EXCLUDED.treatment
 RETURNING id
 `
 
 type UpsertTaxRateParams struct {
-	Code   string
-	Name   string
-	RateBp int32
+	Code      string
+	Name      string
+	RateBp    int32
+	Treatment string
 }
 
 func (q *Queries) UpsertTaxRate(ctx context.Context, arg UpsertTaxRateParams) (int64, error) {
-	row := q.db.QueryRow(ctx, upsertTaxRate, arg.Code, arg.Name, arg.RateBp)
+	row := q.db.QueryRow(ctx, upsertTaxRate,
+		arg.Code,
+		arg.Name,
+		arg.RateBp,
+		arg.Treatment,
+	)
 	var id int64
 	err := row.Scan(&id)
 	return id, err

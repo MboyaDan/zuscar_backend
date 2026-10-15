@@ -76,6 +76,9 @@ type Session struct {
 	RevokeReason      pgtype.Text
 	Ip                *netip.Addr
 	UserAgent         pgtype.Text
+	CsrfHash          []byte
+	AuthMethod        string
+	ReauthAt          pgtype.Timestamptz
 }
 
 type SystemSetting struct {
@@ -92,6 +95,7 @@ type TaxRate struct {
 	RateBp    int32
 	Active    bool
 	CreatedAt pgtype.Timestamptz
+	Treatment string
 }
 
 type User struct {

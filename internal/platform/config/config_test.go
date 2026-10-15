@@ -66,3 +66,23 @@ func TestPortFallsBackToHostPortVariable(t *testing.T) {
 		t.Fatalf("API_PORT should win, got %s", c.Port)
 	}
 }
+
+func TestFrontendURLDefaultsOnlyOutsideProduction(t *testing.T) {
+	c, _ := Load(env(nil))
+	if c.FrontendURL != "http://localhost:3000" {
+		t.Fatalf("development default = %q", c.FrontendURL)
+	}
+	if _, err := Load(env(map[string]string{"APP_ENV": "production", "DATABASE_URL": "postgres://u:p@h/db"})); err == nil {
+		t.Fatal("production without FRONTEND_URL must fail")
+	}
+}
+
+func TestTrustedProxiesParsed(t *testing.T) {
+	c, _ := Load(env(map[string]string{"TRUSTED_PROXIES": " 10.0.0.0/8, 192.168.1.1 ,"}))
+	if len(c.TrustedProxies) != 2 || c.TrustedProxies[0] != "10.0.0.0/8" || c.TrustedProxies[1] != "192.168.1.1" {
+		t.Fatalf("got %v", c.TrustedProxies)
+	}
+	if c, _ = Load(env(nil)); len(c.TrustedProxies) != 0 {
+		t.Fatal("default must trust nobody")
+	}
+}

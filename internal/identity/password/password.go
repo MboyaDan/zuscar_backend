@@ -26,6 +26,10 @@ const (
 	MaxLength = 128
 )
 
+// DevSeedPassword is the public dev-only password the seed command gives fictional users. It lives here (not in the
+// seed package) so the API and bootstrap can refuse it without importing any seed code.
+const DevSeedPassword = "DevOnly-Zuscar-2026"
+
 var ErrMismatch = errors.New("password does not match")
 
 // Hash returns a PHC-format Argon2id hash with a fresh random salt.

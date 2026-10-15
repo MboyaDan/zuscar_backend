@@ -32,6 +32,8 @@ type Config struct {
 	FrontendURL        string
 	LoginMaxAttempts   int
 	LoginLockoutWindow time.Duration
+	LoginIPMaxAttempts int      // failed logins per client IP per window; high by default, see TrustedProxies
+	TrustedProxies     []string // CIDRs or IPs whose X-Forwarded-For is believed; empty = trust nobody
 	IdempotencyTTL     time.Duration
 	MaxRequestBytes    int64
 }
@@ -93,14 +95,23 @@ func Load(getenv func(string) string) (Config, error) {
 		FrontendURL:        str("FRONTEND_URL", ""),
 		LoginMaxAttempts:   int(integer("LOGIN_MAX_ATTEMPTS", 5)),
 		LoginLockoutWindow: dur("LOGIN_LOCKOUT_WINDOW", 15*time.Minute),
+		LoginIPMaxAttempts: int(integer("LOGIN_IP_MAX_ATTEMPTS", 50)),
 		IdempotencyTTL:     dur("IDEMPOTENCY_TTL", 24*time.Hour),
 		MaxRequestBytes:    integer("MAX_REQUEST_BYTES", 1<<20),
 	}
 
+	for _, p := range strings.Split(getenv("TRUSTED_PROXIES"), ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			c.TrustedProxies = append(c.TrustedProxies, p)
+		}
+	}
 	switch c.AppEnv {
 	case EnvDevelopment, EnvTest, EnvProduction:
 	default:
 		errs = append(errs, fmt.Errorf("APP_ENV: want development, test or production, got %q", c.AppEnv))
+	}
+	if c.FrontendURL == "" && c.AppEnv != EnvProduction {
+		c.FrontendURL = "http://localhost:3000" // local development convenience only
 	}
 	if err := c.LogLevel.UnmarshalText([]byte(str("LOG_LEVEL", "info"))); err != nil {
 		errs = append(errs, errors.New("LOG_LEVEL: want debug, info, warn or error"))

@@ -74,7 +74,7 @@ func Run(ctx context.Context, pool *pgxpool.Pool, env config.Env) (created int, 
 		return 0, ErrRealUsers
 	}
 	// DEV ONLY tax value so the sample data has a rate; production values come from the accountant.
-	if err := provision.ApplyBaseData(ctx, tx, provision.BaseOptions{BusinessName: "Zuscar Dev Venue (fake)", TaxName: "Dev VAT (fake)", TaxRateBP: 1600, Timezone: "Africa/Nairobi", ReceiptStart: 1}); err != nil {
+	if err := provision.ApplyBaseData(ctx, tx, provision.BaseOptions{BusinessName: "Zuscar Dev Venue (fake)", TaxName: "Dev VAT (fake)", TaxRateBP: provision.ProvisionalStandardRateBP, Timezone: "Africa/Nairobi", ReceiptStart: 1}); err != nil {
 		return 0, err
 	}
 	for _, u := range Users {

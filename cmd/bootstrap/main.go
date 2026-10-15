@@ -27,15 +27,15 @@ func main() {
 	flag.StringVar(&o.Username, "username", "", "login name for the first Super Admin (required)")
 	flag.StringVar(&o.DisplayName, "display-name", "", "full name shown in the app (required)")
 	flag.StringVar(&o.BusinessName, "business-name", "", "business name for receipts (required)")
-	flag.IntVar(&o.TaxRateBP, "tax-rate-bp", -1, "standard tax rate in basis points, 1600 = 16.00% (required: confirm with your accountant)")
+	flag.IntVar(&o.TaxRateBP, "tax-rate-bp", provision.ProvisionalStandardRateBP, "standard-rated VAT in basis points; the default 1600 (16.00%) is a PROVISIONAL development value, verify before go-live")
 	flag.StringVar(&o.TaxName, "tax-name", "Standard rate", "label for the tax rate")
 	flag.StringVar(&o.Timezone, "timezone", "Africa/Nairobi", "business timezone")
 	flag.Int64Var(&o.ReceiptStart, "receipt-start", 1, "first receipt number (continue your receipt book)")
 	flag.BoolVar(&stdin, "password-stdin", false, "read the password from standard input instead of prompting")
 	flag.Parse()
 
-	if o.Username == "" || o.DisplayName == "" || o.BusinessName == "" || o.TaxRateBP < 0 {
-		fmt.Fprintln(os.Stderr, "missing required flags: --username --display-name --business-name --tax-rate-bp")
+	if o.Username == "" || o.DisplayName == "" || o.BusinessName == "" {
+		fmt.Fprintln(os.Stderr, "missing required flags: --username --display-name --business-name")
 		flag.Usage()
 		os.Exit(2)
 	}
@@ -64,7 +64,10 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("Created Super Admin %q (must change password at first login), roles, permissions, settings, tax rate and counters (first receipt number %d).\n", o.Username, o.ReceiptStart)
-	fmt.Println("Next: sign in, change the password, then create real staff and enter the menu, rooms and stock through the app.")
+	fmt.Printf("\nTAX CONFIGURATION IS PROVISIONAL (standard rate %d basis points, categories: standard, zero_rated, exempt).\n", o.TaxRateBP)
+	fmt.Println("It is not verified against your VAT registration or KRA requirements. Verify it with your accountant BEFORE go-live (docs/tax-configuration.md).")
+	fmt.Println("This system does not integrate with eTIMS: its receipts are not KRA tax invoices.")
+	fmt.Println("\nNext: sign in, change the password, then create real staff and enter the menu, rooms and stock through the app.")
 }
 
 func readPassword(fromStdin bool) (string, error) {

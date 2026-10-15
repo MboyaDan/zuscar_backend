@@ -6,8 +6,8 @@ ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.up
 SELECT value FROM system_settings WHERE key = $1;
 
 -- name: UpsertTaxRate :one
-INSERT INTO tax_rates (code, name, rate_bp) VALUES ($1, $2, $3)
-ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, rate_bp = EXCLUDED.rate_bp
+INSERT INTO tax_rates (code, name, rate_bp, treatment) VALUES ($1, $2, $3, $4)
+ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, rate_bp = EXCLUDED.rate_bp, treatment = EXCLUDED.treatment
 RETURNING id;
 
 -- A counter that already exists is never reset: that would break gapless numbering (A-05).

@@ -61,8 +61,14 @@ func TestBootstrapCreatesOnlyTheMinimum(t *testing.T) {
 	if got := n(`SELECT count(*) FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE r.code = 'super_admin'`); got != 1 {
 		t.Fatalf("super admins = %d", got)
 	}
-	if got := n(`SELECT count(*) FROM tax_rates WHERE code = 'standard' AND rate_bp = 1600`); got != 1 {
-		t.Fatal("tax rate missing")
+	// Owner instruction: standard, zero-rated and exempt categories; the 16 percent value is provisional.
+	if got := n(`SELECT count(*) FROM tax_rates WHERE (code, treatment, rate_bp) IN (('standard','standard',1600), ('zero_rated','zero_rated',0), ('exempt','exempt',0))`); got != 3 {
+		t.Fatalf("expected the three tax categories, matched %d", got)
+	}
+	var taxStatus []byte
+	_ = pool.QueryRow(ctx, `SELECT value FROM system_settings WHERE key = 'tax_config_status'`).Scan(&taxStatus)
+	if string(taxStatus) != `"provisional_unverified"` {
+		t.Fatalf("tax_config_status = %s, want provisional_unverified", taxStatus)
 	}
 	var bn []byte
 	_ = pool.QueryRow(ctx, `SELECT value FROM system_settings WHERE key = 'business_name'`).Scan(&bn)
@@ -145,5 +151,32 @@ func TestApplyBaseDataKeepsExistingCounters(t *testing.T) {
 	_ = pool.QueryRow(ctx, `SELECT next_value FROM document_counters WHERE doc_type = 'receipt'`).Scan(&v)
 	if v != 77 {
 		t.Fatalf("receipt counter reset to %d", v)
+	}
+}
+
+func TestProvisionalRateConstantIsOwnerValue(t *testing.T) {
+	if provision.ProvisionalStandardRateBP != 1600 {
+		t.Fatalf("provisional standard rate = %d basis points, want 1600", provision.ProvisionalStandardRateBP)
+	}
+}
+
+// Owner instruction: the tax rate stays configuration and the categories are constrained in the database.
+func TestTaxCategoryConstraints(t *testing.T) {
+	pool := testdb.New(t)
+	ctx := context.Background()
+	bad := []string{
+		`INSERT INTO tax_rates (code, name, rate_bp, treatment) VALUES ('z5', 'Zero with a rate', 500, 'zero_rated')`,
+		`INSERT INTO tax_rates (code, name, rate_bp, treatment) VALUES ('e5', 'Exempt with a rate', 500, 'exempt')`,
+		`INSERT INTO tax_rates (code, name, rate_bp, treatment) VALUES ('odd', 'Unknown treatment', 0, 'reduced')`,
+		`INSERT INTO tax_rates (code, name, rate_bp, treatment) VALUES ('neg', 'Negative', -1, 'standard')`,
+		`INSERT INTO tax_rates (code, name, rate_bp, treatment) VALUES ('huge', 'Over 100 percent', 10001, 'standard')`,
+	}
+	for _, q := range bad {
+		if _, err := pool.Exec(ctx, q); err == nil {
+			t.Errorf("should have been rejected: %s", q)
+		}
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO tax_rates (code, name, rate_bp, treatment) VALUES ('special_std', 'Another standard-type rate', 800, 'standard')`); err != nil {
+		t.Fatalf("a second standard-treatment category must be possible (rates are configuration): %v", err)
 	}
 }

@@ -7,6 +7,7 @@ package repository
 
 import (
 	"context"
+	"net/netip"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -26,6 +27,34 @@ func (q *Queries) AssignRole(ctx context.Context, arg AssignRoleParams) error {
 	return err
 }
 
+const clearExpiredLock = `-- name: ClearExpiredLock :exec
+UPDATE users SET failed_login_count = 0, locked_until = NULL WHERE id = $1 AND locked_until IS NOT NULL AND locked_until <= $2
+`
+
+type ClearExpiredLockParams struct {
+	ID          int64
+	LockedUntil pgtype.Timestamptz
+}
+
+func (q *Queries) ClearExpiredLock(ctx context.Context, arg ClearExpiredLockParams) error {
+	_, err := q.db.Exec(ctx, clearExpiredLock, arg.ID, arg.LockedUntil)
+	return err
+}
+
+const clearExpiredPinLock = `-- name: ClearExpiredPinLock :exec
+UPDATE user_pins SET failed_count = 0, locked_until = NULL WHERE user_id = $1 AND locked_until IS NOT NULL AND locked_until <= $2
+`
+
+type ClearExpiredPinLockParams struct {
+	UserID      int64
+	LockedUntil pgtype.Timestamptz
+}
+
+func (q *Queries) ClearExpiredPinLock(ctx context.Context, arg ClearExpiredPinLockParams) error {
+	_, err := q.db.Exec(ctx, clearExpiredPinLock, arg.UserID, arg.LockedUntil)
+	return err
+}
+
 const countActiveSuperAdmins = `-- name: CountActiveSuperAdmins :one
 SELECT count(*) FROM user_roles ur
 JOIN roles r ON r.id = ur.role_id AND r.code = 'super_admin'
@@ -34,6 +63,38 @@ JOIN users u ON u.id = ur.user_id AND u.status = 'active'
 
 func (q *Queries) CountActiveSuperAdmins(ctx context.Context) (int64, error) {
 	row := q.db.QueryRow(ctx, countActiveSuperAdmins)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countFailedAttemptsByIP = `-- name: CountFailedAttemptsByIP :one
+SELECT count(*) FROM login_attempts WHERE ip = $1 AND success = false AND attempted_at > $2
+`
+
+type CountFailedAttemptsByIPParams struct {
+	Ip          *netip.Addr
+	AttemptedAt pgtype.Timestamptz
+}
+
+func (q *Queries) CountFailedAttemptsByIP(ctx context.Context, arg CountFailedAttemptsByIPParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countFailedAttemptsByIP, arg.Ip, arg.AttemptedAt)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countFailedAttemptsByUsername = `-- name: CountFailedAttemptsByUsername :one
+SELECT count(*) FROM login_attempts WHERE username_norm = $1 AND success = false AND attempted_at > $2
+`
+
+type CountFailedAttemptsByUsernameParams struct {
+	UsernameNorm string
+	AttemptedAt  pgtype.Timestamptz
+}
+
+func (q *Queries) CountFailedAttemptsByUsername(ctx context.Context, arg CountFailedAttemptsByUsernameParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countFailedAttemptsByUsername, arg.UsernameNorm, arg.AttemptedAt)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -48,6 +109,40 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const createSession = `-- name: CreateSession :one
+INSERT INTO sessions (user_id, token_hash, csrf_hash, auth_method, created_at, last_seen_at, idle_expires_at, absolute_expires_at, ip, user_agent)
+VALUES ($1, $2, $3, $4, $5, $5, $6, $7, $8, $9) RETURNING id
+`
+
+type CreateSessionParams struct {
+	UserID            int64
+	TokenHash         []byte
+	CsrfHash          []byte
+	AuthMethod        string
+	CreatedAt         pgtype.Timestamptz
+	IdleExpiresAt     pgtype.Timestamptz
+	AbsoluteExpiresAt pgtype.Timestamptz
+	Ip                *netip.Addr
+	UserAgent         pgtype.Text
+}
+
+func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (int64, error) {
+	row := q.db.QueryRow(ctx, createSession,
+		arg.UserID,
+		arg.TokenHash,
+		arg.CsrfHash,
+		arg.AuthMethod,
+		arg.CreatedAt,
+		arg.IdleExpiresAt,
+		arg.AbsoluteExpiresAt,
+		arg.Ip,
+		arg.UserAgent,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const createUser = `-- name: CreateUser :one
@@ -76,6 +171,29 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (int64, 
 	return id, err
 }
 
+const getPIN = `-- name: GetPIN :one
+SELECT user_id, pin_hash, failed_count, locked_until FROM user_pins WHERE user_id = $1
+`
+
+type GetPINRow struct {
+	UserID      int64
+	PinHash     string
+	FailedCount int32
+	LockedUntil pgtype.Timestamptz
+}
+
+func (q *Queries) GetPIN(ctx context.Context, userID int64) (GetPINRow, error) {
+	row := q.db.QueryRow(ctx, getPIN, userID)
+	var i GetPINRow
+	err := row.Scan(
+		&i.UserID,
+		&i.PinHash,
+		&i.FailedCount,
+		&i.LockedUntil,
+	)
+	return i, err
+}
+
 const getRoleIDByCode = `-- name: GetRoleIDByCode :one
 SELECT id FROM roles WHERE code = $1
 `
@@ -85,6 +203,78 @@ func (q *Queries) GetRoleIDByCode(ctx context.Context, code string) (int64, erro
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const getSessionByTokenHash = `-- name: GetSessionByTokenHash :one
+SELECT s.id AS session_id, s.user_id, s.csrf_hash, s.auth_method, s.last_seen_at, s.idle_expires_at, s.absolute_expires_at, s.reauth_at,
+       u.username, u.display_name, u.must_change_password
+FROM sessions s JOIN users u ON u.id = s.user_id
+WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND u.status = 'active'
+`
+
+type GetSessionByTokenHashRow struct {
+	SessionID          int64
+	UserID             int64
+	CsrfHash           []byte
+	AuthMethod         string
+	LastSeenAt         pgtype.Timestamptz
+	IdleExpiresAt      pgtype.Timestamptz
+	AbsoluteExpiresAt  pgtype.Timestamptz
+	ReauthAt           pgtype.Timestamptz
+	Username           string
+	DisplayName        string
+	MustChangePassword bool
+}
+
+func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (GetSessionByTokenHashRow, error) {
+	row := q.db.QueryRow(ctx, getSessionByTokenHash, tokenHash)
+	var i GetSessionByTokenHashRow
+	err := row.Scan(
+		&i.SessionID,
+		&i.UserID,
+		&i.CsrfHash,
+		&i.AuthMethod,
+		&i.LastSeenAt,
+		&i.IdleExpiresAt,
+		&i.AbsoluteExpiresAt,
+		&i.ReauthAt,
+		&i.Username,
+		&i.DisplayName,
+		&i.MustChangePassword,
+	)
+	return i, err
+}
+
+const getUserByID = `-- name: GetUserByID :one
+SELECT id, username, display_name, password_hash, status, must_change_password, failed_login_count, locked_until
+FROM users WHERE id = $1
+`
+
+type GetUserByIDRow struct {
+	ID                 int64
+	Username           string
+	DisplayName        string
+	PasswordHash       string
+	Status             string
+	MustChangePassword bool
+	FailedLoginCount   int32
+	LockedUntil        pgtype.Timestamptz
+}
+
+func (q *Queries) GetUserByID(ctx context.Context, id int64) (GetUserByIDRow, error) {
+	row := q.db.QueryRow(ctx, getUserByID, id)
+	var i GetUserByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.DisplayName,
+		&i.PasswordHash,
+		&i.Status,
+		&i.MustChangePassword,
+		&i.FailedLoginCount,
+		&i.LockedUntil,
+	)
+	return i, err
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
@@ -110,6 +300,40 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUs
 		&i.PasswordHash,
 		&i.Status,
 		&i.MustChangePassword,
+	)
+	return i, err
+}
+
+const getUserForLogin = `-- name: GetUserForLogin :one
+
+SELECT id, username, display_name, password_hash, status, must_change_password, failed_login_count, locked_until
+FROM users WHERE username = $1
+`
+
+type GetUserForLoginRow struct {
+	ID                 int64
+	Username           string
+	DisplayName        string
+	PasswordHash       string
+	Status             string
+	MustChangePassword bool
+	FailedLoginCount   int32
+	LockedUntil        pgtype.Timestamptz
+}
+
+// ---- authentication (Stage 6) ----
+func (q *Queries) GetUserForLogin(ctx context.Context, username string) (GetUserForLoginRow, error) {
+	row := q.db.QueryRow(ctx, getUserForLogin, username)
+	var i GetUserForLoginRow
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.DisplayName,
+		&i.PasswordHash,
+		&i.Status,
+		&i.MustChangePassword,
+		&i.FailedLoginCount,
+		&i.LockedUntil,
 	)
 	return i, err
 }
@@ -158,6 +382,123 @@ func (q *Queries) InsertAudit(ctx context.Context, arg InsertAuditParams) error 
 	return err
 }
 
+const insertAuditFull = `-- name: InsertAuditFull :exec
+INSERT INTO audit_logs (occurred_at, actor_user_id, actor_label, action, entity_type, entity_id, reason, result, before_json, after_json, request_id, ip)
+VALUES ($1, $2, $3, $4, $5, $6,
+        $7, $8, $9, $10, $11, $12)
+`
+
+type InsertAuditFullParams struct {
+	OccurredAt  pgtype.Timestamptz
+	ActorUserID pgtype.Int8
+	ActorLabel  string
+	Action      string
+	EntityType  string
+	EntityID    pgtype.Text
+	Reason      pgtype.Text
+	Result      string
+	BeforeJson  []byte
+	AfterJson   []byte
+	RequestID   pgtype.Text
+	Ip          *netip.Addr
+}
+
+// Security events carry a result, request id and client address (before/after never hold secrets).
+func (q *Queries) InsertAuditFull(ctx context.Context, arg InsertAuditFullParams) error {
+	_, err := q.db.Exec(ctx, insertAuditFull,
+		arg.OccurredAt,
+		arg.ActorUserID,
+		arg.ActorLabel,
+		arg.Action,
+		arg.EntityType,
+		arg.EntityID,
+		arg.Reason,
+		arg.Result,
+		arg.BeforeJson,
+		arg.AfterJson,
+		arg.RequestID,
+		arg.Ip,
+	)
+	return err
+}
+
+const insertLoginAttempt = `-- name: InsertLoginAttempt :exec
+INSERT INTO login_attempts (username_norm, ip, attempted_at, success) VALUES ($1, $2, $3, $4)
+`
+
+type InsertLoginAttemptParams struct {
+	UsernameNorm string
+	Ip           *netip.Addr
+	AttemptedAt  pgtype.Timestamptz
+	Success      bool
+}
+
+func (q *Queries) InsertLoginAttempt(ctx context.Context, arg InsertLoginAttemptParams) error {
+	_, err := q.db.Exec(ctx, insertLoginAttempt,
+		arg.UsernameNorm,
+		arg.Ip,
+		arg.AttemptedAt,
+		arg.Success,
+	)
+	return err
+}
+
+const listPermissionKeysForUser = `-- name: ListPermissionKeysForUser :many
+SELECT DISTINCT p.key FROM user_roles ur
+JOIN role_permissions rp ON rp.role_id = ur.role_id
+JOIN permissions p ON p.id = rp.permission_id
+WHERE ur.user_id = $1 ORDER BY p.key
+`
+
+func (q *Queries) ListPermissionKeysForUser(ctx context.Context, userID int64) ([]string, error) {
+	rows, err := q.db.Query(ctx, listPermissionKeysForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		items = append(items, key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRolesForUser = `-- name: ListRolesForUser :many
+SELECT r.code, r.name FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = $1 ORDER BY r.code
+`
+
+type ListRolesForUserRow struct {
+	Code string
+	Name string
+}
+
+func (q *Queries) ListRolesForUser(ctx context.Context, userID int64) ([]ListRolesForUserRow, error) {
+	rows, err := q.db.Query(ctx, listRolesForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRolesForUserRow
+	for rows.Next() {
+		var i ListRolesForUserRow
+		if err := rows.Scan(&i.Code, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUsernamesNotDev = `-- name: ListUsernamesNotDev :many
 SELECT username FROM users WHERE username NOT LIKE 'dev.%' ORDER BY username
 `
@@ -180,6 +521,201 @@ func (q *Queries) ListUsernamesNotDev(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const pruneLoginAttempts = `-- name: PruneLoginAttempts :exec
+DELETE FROM login_attempts WHERE attempted_at < $1
+`
+
+func (q *Queries) PruneLoginAttempts(ctx context.Context, attemptedAt pgtype.Timestamptz) error {
+	_, err := q.db.Exec(ctx, pruneLoginAttempts, attemptedAt)
+	return err
+}
+
+const recordFailedLogin = `-- name: RecordFailedLogin :one
+UPDATE users SET
+  failed_login_count = failed_login_count + 1,
+  locked_until = CASE WHEN failed_login_count + 1 >= $1::int THEN $2::timestamptz ELSE locked_until END
+WHERE id = $3
+RETURNING failed_login_count, locked_until
+`
+
+type RecordFailedLoginParams struct {
+	MaxAttempts int32
+	LockUntil   pgtype.Timestamptz
+	ID          int64
+}
+
+type RecordFailedLoginRow struct {
+	FailedLoginCount int32
+	LockedUntil      pgtype.Timestamptz
+}
+
+func (q *Queries) RecordFailedLogin(ctx context.Context, arg RecordFailedLoginParams) (RecordFailedLoginRow, error) {
+	row := q.db.QueryRow(ctx, recordFailedLogin, arg.MaxAttempts, arg.LockUntil, arg.ID)
+	var i RecordFailedLoginRow
+	err := row.Scan(&i.FailedLoginCount, &i.LockedUntil)
+	return i, err
+}
+
+const recordPinFailure = `-- name: RecordPinFailure :one
+UPDATE user_pins SET
+  failed_count = failed_count + 1,
+  locked_until = CASE WHEN failed_count + 1 >= $1::int THEN $2::timestamptz ELSE locked_until END
+WHERE user_id = $3
+RETURNING failed_count, locked_until
+`
+
+type RecordPinFailureParams struct {
+	MaxAttempts int32
+	LockUntil   pgtype.Timestamptz
+	UserID      int64
+}
+
+type RecordPinFailureRow struct {
+	FailedCount int32
+	LockedUntil pgtype.Timestamptz
+}
+
+func (q *Queries) RecordPinFailure(ctx context.Context, arg RecordPinFailureParams) (RecordPinFailureRow, error) {
+	row := q.db.QueryRow(ctx, recordPinFailure, arg.MaxAttempts, arg.LockUntil, arg.UserID)
+	var i RecordPinFailureRow
+	err := row.Scan(&i.FailedCount, &i.LockedUntil)
+	return i, err
+}
+
+const recordSuccessfulLogin = `-- name: RecordSuccessfulLogin :exec
+UPDATE users SET failed_login_count = 0, locked_until = NULL, last_login_at = $2 WHERE id = $1
+`
+
+type RecordSuccessfulLoginParams struct {
+	ID          int64
+	LastLoginAt pgtype.Timestamptz
+}
+
+func (q *Queries) RecordSuccessfulLogin(ctx context.Context, arg RecordSuccessfulLoginParams) error {
+	_, err := q.db.Exec(ctx, recordSuccessfulLogin, arg.ID, arg.LastLoginAt)
+	return err
+}
+
+const resetPinFailures = `-- name: ResetPinFailures :exec
+UPDATE user_pins SET failed_count = 0, locked_until = NULL WHERE user_id = $1
+`
+
+func (q *Queries) ResetPinFailures(ctx context.Context, userID int64) error {
+	_, err := q.db.Exec(ctx, resetPinFailures, userID)
+	return err
+}
+
+const revokeAllUserSessions = `-- name: RevokeAllUserSessions :exec
+UPDATE sessions SET revoked_at = $2, revoke_reason = $3 WHERE user_id = $1 AND revoked_at IS NULL
+`
+
+type RevokeAllUserSessionsParams struct {
+	UserID       int64
+	RevokedAt    pgtype.Timestamptz
+	RevokeReason pgtype.Text
+}
+
+func (q *Queries) RevokeAllUserSessions(ctx context.Context, arg RevokeAllUserSessionsParams) error {
+	_, err := q.db.Exec(ctx, revokeAllUserSessions, arg.UserID, arg.RevokedAt, arg.RevokeReason)
+	return err
+}
+
+const revokeOtherSessions = `-- name: RevokeOtherSessions :exec
+UPDATE sessions SET revoked_at = $3, revoke_reason = $4 WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL
+`
+
+type RevokeOtherSessionsParams struct {
+	UserID       int64
+	ID           int64
+	RevokedAt    pgtype.Timestamptz
+	RevokeReason pgtype.Text
+}
+
+func (q *Queries) RevokeOtherSessions(ctx context.Context, arg RevokeOtherSessionsParams) error {
+	_, err := q.db.Exec(ctx, revokeOtherSessions,
+		arg.UserID,
+		arg.ID,
+		arg.RevokedAt,
+		arg.RevokeReason,
+	)
+	return err
+}
+
+const revokeSession = `-- name: RevokeSession :exec
+UPDATE sessions SET revoked_at = $2, revoke_reason = $3 WHERE id = $1 AND revoked_at IS NULL
+`
+
+type RevokeSessionParams struct {
+	ID           int64
+	RevokedAt    pgtype.Timestamptz
+	RevokeReason pgtype.Text
+}
+
+func (q *Queries) RevokeSession(ctx context.Context, arg RevokeSessionParams) error {
+	_, err := q.db.Exec(ctx, revokeSession, arg.ID, arg.RevokedAt, arg.RevokeReason)
+	return err
+}
+
+const setPassword = `-- name: SetPassword :exec
+UPDATE users SET password_hash = $2, must_change_password = $3, failed_login_count = 0, locked_until = NULL WHERE id = $1
+`
+
+type SetPasswordParams struct {
+	ID                 int64
+	PasswordHash       string
+	MustChangePassword bool
+}
+
+func (q *Queries) SetPassword(ctx context.Context, arg SetPasswordParams) error {
+	_, err := q.db.Exec(ctx, setPassword, arg.ID, arg.PasswordHash, arg.MustChangePassword)
+	return err
+}
+
+const setSessionReauth = `-- name: SetSessionReauth :exec
+UPDATE sessions SET reauth_at = $2 WHERE id = $1 AND revoked_at IS NULL
+`
+
+type SetSessionReauthParams struct {
+	ID       int64
+	ReauthAt pgtype.Timestamptz
+}
+
+func (q *Queries) SetSessionReauth(ctx context.Context, arg SetSessionReauthParams) error {
+	_, err := q.db.Exec(ctx, setSessionReauth, arg.ID, arg.ReauthAt)
+	return err
+}
+
+const touchSession = `-- name: TouchSession :exec
+UPDATE sessions SET last_seen_at = $2, idle_expires_at = $3 WHERE id = $1 AND revoked_at IS NULL
+`
+
+type TouchSessionParams struct {
+	ID            int64
+	LastSeenAt    pgtype.Timestamptz
+	IdleExpiresAt pgtype.Timestamptz
+}
+
+func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) error {
+	_, err := q.db.Exec(ctx, touchSession, arg.ID, arg.LastSeenAt, arg.IdleExpiresAt)
+	return err
+}
+
+const upsertPIN = `-- name: UpsertPIN :exec
+INSERT INTO user_pins (user_id, pin_hash, failed_count, locked_until, updated_at) VALUES ($1, $2, 0, NULL, $3)
+ON CONFLICT (user_id) DO UPDATE SET pin_hash = EXCLUDED.pin_hash, failed_count = 0, locked_until = NULL, updated_at = EXCLUDED.updated_at
+`
+
+type UpsertPINParams struct {
+	UserID    int64
+	PinHash   string
+	UpdatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) UpsertPIN(ctx context.Context, arg UpsertPINParams) error {
+	_, err := q.db.Exec(ctx, upsertPIN, arg.UserID, arg.PinHash, arg.UpdatedAt)
+	return err
 }
 
 const upsertPermission = `-- name: UpsertPermission :one

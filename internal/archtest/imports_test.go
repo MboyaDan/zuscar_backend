@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -151,6 +152,35 @@ func TestOnlySeedCommandImportsDevseed(t *testing.T) {
 		for _, im := range f.Imports {
 			if strings.HasSuffix(strings.Trim(im.Path.Value, `"`), "/internal/devseed") && !strings.Contains(filepath.ToSlash(p), "cmd/seed-dev/") {
 				t.Errorf("%s imports devseed; only cmd/seed-dev may", p)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Owner instruction: the tax rate stays configuration. The provisional development value may appear in exactly one
+// place (provision.go, which defines the named constant); no other production Go file may contain it.
+func TestTaxRateIsNotHardCoded(t *testing.T) {
+	err := filepath.WalkDir("..", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
+			return err
+		}
+		slash := filepath.ToSlash(p)
+		if strings.HasSuffix(slash, "provision/provision.go") || strings.Contains(slash, "/repository/") {
+			return nil
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		for _, banned := range []string{"1600", "0.16", "16%"} {
+			for i, line := range strings.Split(string(b), "\n") {
+				if strings.Contains(line, banned) && !strings.Contains(line, "tax-rate-bp") {
+					t.Errorf("%s:%d contains %q: tax rates are configuration, use settings or tax_rates", slash, i+1, banned)
+				}
 			}
 		}
 		return nil

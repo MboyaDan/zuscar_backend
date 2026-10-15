@@ -10,6 +10,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gin-gonic/gin"
+
+	idhandler "zuscar/backend/internal/identity/handler"
+	idservice "zuscar/backend/internal/identity/service"
 	"zuscar/backend/internal/platform/config"
 	"zuscar/backend/internal/platform/db"
 	zhttp "zuscar/backend/internal/platform/http"
@@ -28,6 +32,7 @@ func main() {
 	log := logging.New(os.Stdout, cfg.LogLevel)
 
 	var pinger zhttp.Pinger
+	var authReady func(*gin.RouterGroup) error
 	if cfg.DatabaseURL != "" {
 		pool, err := db.New(context.Background(), cfg.DatabaseURL, cfg.DBSimpleProtocol)
 		if err != nil {
@@ -36,13 +41,38 @@ func main() {
 		}
 		defer pool.Close()
 		pinger = pool
+		authReady = func(v1 *gin.RouterGroup) error {
+			svc, err := idservice.New(pool, idservice.Config{
+				IdleTTL: cfg.SessionIdleTTL, AbsoluteTTL: cfg.SessionAbsoluteTTL, MaxAttempts: cfg.LoginMaxAttempts,
+				LockoutWindow: cfg.LoginLockoutWindow, IPMaxAttempts: cfg.LoginIPMaxAttempts,
+				ReauthWindow: 5 * time.Minute, TouchInterval: time.Minute,
+			}, nil)
+			if err != nil {
+				return err
+			}
+			h, err := idhandler.New(svc, cfg.FrontendURL, cfg.CookieSecure, log)
+			if err != nil {
+				return err
+			}
+			h.Register(v1)
+			return nil
+		}
 	} else {
 		log.Warn("DATABASE_URL not set: /readyz will report not ready")
 	}
 
-	router, _ := zhttp.NewRouter(zhttp.Deps{
+	router, v1 := zhttp.NewRouter(zhttp.Deps{
 		Logger: log, DB: pinger, MaxRequestBytes: cfg.MaxRequestBytes, Production: cfg.AppEnv == config.EnvProduction,
+		TrustedProxies: cfg.TrustedProxies,
 	})
+	if authReady != nil {
+		if err := authReady(v1); err != nil {
+			log.Error("authentication setup failed", "error", err.Error())
+			os.Exit(1)
+		}
+	} else {
+		log.Warn("authentication routes are disabled because DATABASE_URL is not set")
+	}
 	srv := &nethttp.Server{
 		Addr: ":" + cfg.Port, Handler: router,
 		ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,

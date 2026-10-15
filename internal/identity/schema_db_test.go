@@ -234,9 +234,13 @@ func TestSessionTokenHashRules(t *testing.T) {
 	ctx := context.Background()
 	u := addUser(t, pool, "dev.cashier1", "cashier")
 	ins := func(hash []byte) error {
-		_, err := pool.Exec(ctx, `INSERT INTO sessions (user_id, token_hash, idle_expires_at, absolute_expires_at) VALUES ($1, $2, now() + interval '1 hour', now() + interval '2 hours')`, u, hash)
+		_, err := pool.Exec(ctx, `INSERT INTO sessions (user_id, token_hash, csrf_hash, auth_method, idle_expires_at, absolute_expires_at) VALUES ($1, $2, $3, 'password', now() + interval '1 hour', now() + interval '2 hours')`, u, hash, make([]byte, 32))
 		return err
 	}
+	_, err := pool.Exec(ctx, `INSERT INTO sessions (user_id, token_hash, csrf_hash, auth_method, idle_expires_at, absolute_expires_at) VALUES ($1, $2, $3, 'password', now(), now())`, u, make([]byte, 32), make([]byte, 5))
+	wantFail(t, err, "sessions_csrf_hash_check")
+	_, err = pool.Exec(ctx, `INSERT INTO sessions (user_id, token_hash, csrf_hash, auth_method, idle_expires_at, absolute_expires_at) VALUES ($1, $2, $3, 'magic', now(), now())`, u, make([]byte, 32), make([]byte, 32))
+	wantFail(t, err, "sessions_auth_method_check")
 	wantFail(t, ins(make([]byte, 31)), "sessions_token_hash_check")
 	h := make([]byte, 32)
 	h[0] = 1
@@ -247,3 +251,18 @@ func TestSessionTokenHashRules(t *testing.T) {
 }
 
 var _ = pgx.ErrNoRows
+
+// Regression (found by the Stage 6 tests): the guard must only act for Super Admins, so an ordinary user can be
+// deactivated or have roles removed even when no Super Admin exists yet.
+func TestGuardIgnoresUsersWhoAreNotSuperAdmins(t *testing.T) {
+	pool := seeded(t)
+	c := addUser(t, pool, "dev.cashier1", "cashier")
+	mustExec(t, pool, `DELETE FROM user_roles WHERE user_id = $1`, c)
+	mustExec(t, pool, `UPDATE users SET status = 'inactive', deactivated_at = now() WHERE id = $1`, c)
+	// and with a Super Admin present, still no effect on others, while the Super Admin stays protected
+	a := addUser(t, pool, "owner.a", "super_admin")
+	d := addUser(t, pool, "dev.cashier2", "cashier")
+	mustExec(t, pool, `UPDATE users SET status = 'inactive', deactivated_at = now() WHERE id = $1`, d)
+	_, err := pool.Exec(context.Background(), `UPDATE users SET status = 'inactive', deactivated_at = now() WHERE id = $1`, a)
+	wantFail(t, err, "no active Super Admin")
+}

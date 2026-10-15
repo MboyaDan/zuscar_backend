@@ -1,5 +1,73 @@
 # Zuscar build progress
 
+## RESUME HERE (written after Stage 6; read this section first in a fresh chat)
+
+Master prompt and brief: `docs/system-requirements.docx` is the brief (source of truth for WHAT to build). The master prompt (stage protocol, honesty rules, design system) is not stored in the repo: ask the owner to paste it again, then apply section 2 below, which lists every change the owner made to it since. Stages 0 to 6 are done; the next one is Stage 7. Stop after each stage and wait for the owner to say "continue".
+
+### 1. Current state
+- **Backend repo** (folder `zuscar/backend`, branch `main`): last completed stage **6**, commit `ceb3772` (Stage 5 is `7e1b20b`). History for stages 0 to 4 is NOT in this repo; it exists only in the earlier monorepo zips `zuscar-stage-00` to `zuscar-stage-04`. All project documents live here in `docs/`.
+- **Frontend repo** (folder `zuscar/frontend`, branch `main`): last completed stage **5**, commit `ce99b9f` (the split into its own repo). Stage 6 made no frontend change. It has the shell page, brand logos through `components/Logo.tsx`, Tailwind tokens, self-hosted fonts, the Test environment banner, a `BackendStatus` card and the `/api/*` rewrite to `BACKEND_URL`. It has NO login screen and no app screens (Stage 8).
+- **Latest deliverable:** `zuscar-stage-06.zip` containing `zuscar/backend` and `zuscar/frontend`, each with its own `.git`. This docs update is a patch (`zuscar-resume-docs.patch`), not a stage.
+- **Backend contents:** API with `/healthz`, `/readyz`, `/api/v1/health` and `/api/v1/auth/{login,logout,me,change-password,reauth,pin-switch}`; migrations `0001` to `0007`; commands `migrate`, `bootstrap`, `seed-dev`; permission and role catalog; sqlc repositories for identity and settings; Docker Compose (postgres and backend) and a test runner service; CI workflow (never run).
+- **Tests:** in a fresh clone with PostgreSQL 16.15 in the authoring sandbox: 94 pass, 0 fail, 0 skip. Without `TEST_DATABASE_URL`: 42 pass, 52 skip loudly. The database tests have run only in the authoring sandbox, never on the owner's machine or in CI.
+- **Half-finished work:** none in code; every stage ended at a clean, committed boundary. Deliberate partial pieces: `SetPIN` exists as a service with no endpoint yet (Stage 7); `system_settings.tax_config_status` is set to `provisional_unverified` but nothing can mark it verified yet (Stage 7); there is no frontend for the auth endpoints (Stage 8); `docs/api/routes.csv` lists the whole planned API (155 routes) while `openapi.yaml` documents only built endpoints.
+- **Known stale wording** (not corrected, superseded by ADR-14): `architecture.md`, `deployment/topology.md`, `erd.md` and the Stage 1 to 4 entries below still describe a single monorepo and `frontend/...` paths.
+- **Authoring-sandbox notes** (only matter when working in a chat sandbox): the sandbox resets between tasks. `scripts/sandbox-setup.sh` rebuilds the toolchain (Go 1.27.2 is built from GitHub source, about 10 minutes; PostgreSQL 16 via apt) and `scripts/sandbox/resolve-modules.sh` resolves Go modules through a local proxy because `golang.org` and `proxy.golang.org` are blocked. PostgreSQL stops between tool calls, so start it inside the same command as the tests. The sandbox shell is `/bin/sh` (no brace expansion); `pkill -f` can match its own shell, so use patterns like `[b]in/api`. Docker and GitHub are not available there.
+- **To resume:** the owner writes "resume" with `zuscar-stage-06.zip` attached. Unzip, read this section and `docs/OPEN_ITEMS.md`, summarise the state in three lines, then do Stage 7 only.
+
+### 2. Owner instructions given in chat that change or add to the master prompt or the brief
+1. Two independent repositories, `backend` and `frontend`, each with its own Git history, README, `.env.example` and CI; this supersedes the monorepo layout in prompt section 6 (ADR-14).
+2. The stage zip contains exactly two folders, `zuscar/backend` and `zuscar/frontend`, each a Git repo; the zip command is no longer the monorepo one.
+3. Docker is for the backend only (Compose with postgres and the backend, `env_file: .env`, modelled on the owner's Mezani example). The frontend does not use Docker; it runs locally with `npm install` and `npm run dev` and deploys to Vercel. The backend deploys to Render.
+4. Every stage must keep clear step-by-step run instructions in each README: backend entirely in Docker, frontend with `npm install` and `npm run dev`.
+5. URLs and secrets always come from environment variables, never hard-coded: backend `DATABASE_URL` and `FRONTEND_URL`; frontend `.env.local` with `NEXT_PUBLIC_APP_URL=http://localhost:3000` plus `BACKEND_URL` (the owner chose these names; they replaced `APP_ORIGIN` and `API_INTERNAL_URL`).
+6. Business Manager does NOT hold `roles.manage` or `permissions.assign`; only Super Admin does (S-13).
+7. The `bootstrap` flag `--tax-rate-bp` defaults to 1600 (16%) as a provisional development value only; the tax rate stays configuration; tax categories include standard, zero-rated and exempt; never assume every item is standard-rated; document that production tax configuration must be verified against the VAT registration and KRA requirements before go-live; make no eTIMS compliance claim until the integration route is verified and tested.
+8. Track S-17, S-18 and S-21 as open items; keep the seeded S-15 permission keys unless a conflict with the agreed requirements is found.
+9. Work only on what is asked in each message and wait for "continue" before the next stage (prompt section 2, restated for this docs update).
+10. **Mentioned but not defined:** the owner's message requesting this update refers to "the patch workflow". No instruction defining it appears earlier in this chat, so none is applied. Until the owner defines it, stage deliverables stay as stage zips, and this docs update is delivered as a git patch applied with `git apply`.
+
+### 3. Deviations (code or docs differ from the brief or master prompt, and why)
+- **Two repos instead of a monorepo, and no frontend Dockerfile or Compose** (prompt section 6): owner decision (ADR-14). Docs and migrations live in the backend repo. The new repos start fresh histories.
+- **Renamed variables** `APP_ORIGIN` to `FRONTEND_URL` and `API_INTERNAL_URL` to `BACKEND_URL`: owner naming. `NEXT_PUBLIC_APP_URL` added. The rewrite target is read at build time (verified).
+- **Migrations use a small repo-owned runner**, not golang-migrate: brief allows an equivalent; smaller and fully tested (ADR-12).
+- **Go 1.27.2 built from source in the sandbox; modules resolved through a local proxy; `go.sum` generated with checksum checking off** (ADR-11): the sandbox blocks the Go module proxy. `go.mod` has no replace lines. The owner must run `go mod tidy && go mod verify` locally.
+- **TypeScript pinned to 5.9.3** although 7.x exists on npm: not tried with Next.
+- **Favicon PNGs (16, 32, 64) and the 180 px Apple icon were rendered from the supplied favicon SVG** (only the SVG was supplied); the Apple icon sits on Cream. Listed in `CONTENT_TODO.md`.
+- **Row Level Security and the migrator/app database roles are deferred to Stage 25** (brief section 12 mentions RLS as defence in depth): with RLS and no policies a non-owner app role sees no rows, so the role model and policies must be designed and tested on Supabase together.
+- **Brief entity list changed** (`schema-constraints.md`): added `tax_rates` (with treatment), `user_pins`, `login_attempts`, `price_history`, `product_modifiers`, `order_item_modifiers`, `ticket_status_history`, `refund_items`, `sale_voids`, `print_attempts`; `folio_payments` is merged into `payments`; `tables` is `dining_tables`; stock quantities are base-unit integers.
+- **Extra permission keys beyond the brief** (S-15), retained by the owner; Business Manager lacks the two role-administration keys (item 6 above).
+- **CSRF design is stronger than the double-submit sketch**: the token is bound to the session (ADR-13).
+- **Route plan gained `/api/v1/health`** (liveness through the web proxy for the connection indicator).
+- **`PORT` is accepted when `API_PORT` is unset** (Render supplies `PORT`; not yet verified on Render).
+- **Stage size discipline** (prompt section 2, about 25 files): Stages 4, 5 and 6 exceeded it (brand assets, lock files, many tests); noted in each stage entry.
+- **Seed password constant lives in the `password` package** so the API and `bootstrap` can refuse it without importing seed code; `devseed` still refuses production and databases that hold real users.
+- **Some tables were added before the stage the plan named** (settings, tax categories at Stage 5, session CSRF columns at Stage 6) because bootstrap and login needed them.
+
+### 4. Open decisions, assumptions and checks not yet run
+- **Open decisions** (details in `docs/OPEN_ITEMS.md`): S-17, S-18, S-21 are OPEN; S-15 retained; T-01 provisional tax configuration is a **go-live blocker**; T-02 explicit tax category per product and room type; T-03 and DG-01 eTIMS route; DG-02 M-Pesa route; DG-03 printer model and connection; DG-04 hosting plans and budget; business details and receipt text (`CONTENT_TODO.md`); the accountant questions in `docs/tax-configuration.md`.
+- **Assumptions:** every default in use, with who must confirm, is in `ASSUMPTIONS.md` (A-xx, DQ-xx from the brief; S-01 to S-33 from this build). Only S-13 is confirmed. See its new status table and its interpretations list.
+- **Checks not yet run:**
+  - Docker: neither Dockerfile target nor Compose has ever been built or started; base-image tags `golang:1.27`, `postgres:16`, `gcr.io/distroless/static-debian12:nonroot` are unchecked. Owner command: `docker compose up --build -d`, then `docker compose run --rm test`.
+  - CI: both GitHub workflows have never run; action versions are unverified.
+  - `go.sum` against the public checksum database; `sqlc diff` in CI.
+  - Database tests on the owner's machine or CI (they ran only in the sandbox on PostgreSQL 16.15).
+  - Supabase: `btree_gist`, direct versus pooler connection, `sslmode`, backups, pausing; Render: `PORT`, health check path, always-on plan; Vercel: rewrite forwarding of cookies, `Origin` and `Set-Cookie`, long requests; real client IP behind proxies and `TRUSTED_PROXIES`.
+  - Argon2id parameters on the real Render instance size (S-24).
+  - Mermaid diagrams were parsed but never rendered visually; the frontend has no automated tests beyond lint, typecheck, build and the brand check; no accessibility or screen-reader test.
+  - Hardware and operations: printer (AC-16, DG-03), backup restore drill (AC-15), outage runbook walkthrough (AC-17).
+  - Not yet written, so not yet run: tests for idempotency and sale finalisation (Stage 11), the stock ledger (17 and 18), room overlap concurrency (20), folios (21), reports reconciliation (23), the AC-10 route-table test and AC-11 and AC-12 service tests (7).
+  - Gated and not built: eTIMS and M-Pesa providers (stubs only at Stage 24).
+
+### 5. Promised for later
+- **Stage 7:** permission middleware, user and role admin endpoints, Super Admin safeguards, audit writing, `PUT /users/{id}/pin`, the settings endpoint that marks the tax configuration verified (system.admin, password re-entry, audited), the AC-10 route-table test and AC-11 and AC-12 service tests.
+- **Stage 8:** login and app screens, permission-aware navigation, API client with the idempotency helper, connection indicator linking to the outage procedure; check the Vercel rewrite on a real preview deployment (Stages 6 to 8).
+- **Stages 9 and 20:** products and room types get a NOT NULL tax category with no default. **Stage 11:** sale lines snapshot tax treatment and rate; reports break tax down by treatment. **Stage 10:** confirm S-17. **Stage 12:** confirm S-21. **Stage 15:** confirm S-18. **Stage 14:** `printer-test-sheet.md`. **Stage 17:** decide the stock balance strategy. **Stage 24:** ask the owner for verified eTIMS (DG-01) and M-Pesa (DG-02) facts; no provider code without them.
+- **Stage 25:** Row Level Security and database roles on Supabase, verify `TRUSTED_PROXIES` on the deployed stack, security headers and CSP, secrets scan, dependency audit, choose an error-monitoring tool, OpenAPI completeness, final AC-xx traceability pass.
+- **Stage 26:** deployment guides (Render, Vercel, Supabase, Cloudflare), backup and restore runbook, Super Admin recovery CLI, printer-failure and outage runbooks, staff training guide, handover checklist, go-live clean-up (no test users, no dev password works, fresh production database, counters continue the receipt book, Test environment banner gone, `tax_config_status` verified).
+- **Every stage:** keep listing the database-dependent invariants as unrun anywhere beyond the sandbox until they run on the owner's machine or CI; keep both READMEs' run steps current; refresh `OPEN_ITEMS.md`.
+- **Other:** swap in designer-made favicon PNGs if supplied; remove stale monorepo wording from the older docs; consider re-checking TypeScript 7 with Next.
+
 ## Stage 0: Orientation (done, docs only, no code)
 
 **Understanding.** Zuscar is a single-venue, online-first hospitality system (restaurant, bar/club, ~13 rooms) built as a modular monolith: Next.js on Vercel proxies `/api/*` (ADR-05) to a Go/Gin API on Render, which is the only client of Supabase PostgreSQL (ADR-02). Integrity rules drive the design: integer-KES money (NN-09), atomic idempotent sale finalisation (NN-04), print separate from persistence (NN-05), append-only stock ledger (ADR-07), DB exclusion constraint for room overlap (ADR-06), room charges as folio postings (NN-10), manual M-Pesa pending until confirmed (NN-11). eTIMS (DG-01) and M-Pesa API (DG-02) are gated: stubs only.
@@ -81,4 +149,13 @@ Stage 1 (architecture pack, docs only): no input needed from you.
 - **Decisions and assumptions:** ADR-12 accepted, ADR-14 added; S-24 to S-28.
 - **Open items:** S-15 (extra permission keys) was seeded as written, so treat it as confirmed unless you object; S-17, S-18, S-21 still to confirm.
 - **Next stage needs:** nothing blocking. Stage 6 (authentication: login, logout, me, sessions, CSRF, lockout, optional PIN).
+
+## Stage 6: Authentication (done) and tax configuration
+- **Owner instructions applied:** (1) `--tax-rate-bp` now defaults to 1600 as a PROVISIONAL development value, never a confirmed production tax configuration; the rate stays configuration (`TestTaxRateIsNotHardCoded` forbids the literal anywhere else); three tax categories exist (standard, zero-rated, exempt; migration 0005 with database CHECKs); `tax_config_status = provisional_unverified` and a loud bootstrap notice; products and room types must name a category explicitly (no implicit standard rate); `docs/tax-configuration.md` holds the go-live verification checklist (VAT registration, KRA requirements); no eTIMS compliance is claimed anywhere. (2) S-17, S-18, S-21 stay OPEN in `docs/OPEN_ITEMS.md`; S-15 retained as seeded after a conflict check (none found).
+- **Built:** login, logout, me, change-password, reauth, pin-switch endpoints; Argon2id verification with a timing-equalising dummy hash and rehash-on-login; opaque 256-bit session tokens (only SHA-256 stored); sliding idle expiry and a hard absolute expiry; permissions and roles read from the database on every request; lockout (5th failure locks 15 min), per-username throttling for unknown names, per-IP limit; session-bound CSRF token plus Origin/Referer check (ADR-13 accepted); forced password change gate; password re-entry window (5 min, S-16); PIN fast-switch for floor roles (A-07); audit of security events with request ID and IP and no secrets; `internal/platform/auth` Principal for other modules; `TRUSTED_PROXIES` and `LOGIN_IP_MAX_ATTEMPTS`; migrations 0005 to 0007; OpenAPI auth paths (validated with swagger-parser).
+- **Verified in the sandbox:** in a fresh clone with PostgreSQL 16.15: 94 Go tests pass, 0 fail, 0 skipped (without TEST_DATABASE_URL: 42 pass, 52 skip loudly). `go mod tidy` no diff, gofmt, vet and `sqlc diff` clean. Two mutation checks (weaken CSRF; remove the PIN expiry bound) made their tests fail. End-to-end with the real binaries and `npm run dev`: migrate (0001 to 0007), bootstrap without a tax flag (provisional notice and three categories), login through the Next proxy returned both cookies (session HttpOnly), CSRF rejections, password change, logout, 401 afterwards.
+- **Bug found by the tests and fixed:** the last-Super-Admin trigger blocked deactivating any user when no Super Admin existed. Migration 0007 makes it act only for Super Admins (`TestGuardIgnoresUsersWhoAreNotSuperAdmins`).
+- **Not verified:** Docker artefacts and CI (no Docker or GitHub here); Vercel and Render behaviour (cookies, Origin, Set-Cookie through the rewrite; real client IP behind proxies); Supabase; `go.sum` against the checksum database. No frontend change this stage, so the frontend repo has no new commit. Login SCREENS are Stage 8.
+- **Decisions and assumptions:** S-26 revised; S-29 to S-33 added (ASSUMPTIONS.md); ADR-13 accepted.
+- **Next stage needs:** nothing blocking. Stage 7: permission middleware, user and role admin endpoints, Super Admin safeguards, audit writing, the tax-verification settings endpoint, and the AC-10, AC-11, AC-12 service tests.
 

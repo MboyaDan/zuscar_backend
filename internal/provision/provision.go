@@ -25,7 +25,17 @@ import (
 
 // KnownDevPassword is the documented dev-only seed password. Bootstrap refuses it, so a production
 // Super Admin can never be created with the password that every developer knows (go-live checklist).
-const KnownDevPassword = "DevOnly-Zuscar-2026"
+const KnownDevPassword = password.DevSeedPassword
+
+// ProvisionalStandardRateBP is a DEVELOPMENT default (owner instruction): 1600 basis points = 16.00 percent,
+// the commonly quoted standard VAT rate in Kenya. It is NOT a verified production tax configuration. The real
+// configuration must be checked against the business's VAT registration and KRA requirements before go-live
+// (docs/tax-configuration.md). Until an administrator marks it verified, tax_config_status stays
+// "provisional_unverified".
+const (
+	ProvisionalStandardRateBP = 1600
+	TaxStatusProvisional      = "provisional_unverified"
+)
 
 var (
 	ErrAlreadyBootstrapped = errors.New("the database already has users: bootstrap creates the first Super Admin on an empty system only")
@@ -89,6 +99,7 @@ func ApplyBaseData(ctx context.Context, tx pgx.Tx, o BaseOptions) error {
 		"business_name": strings.TrimSpace(o.BusinessName), "timezone": o.Timezone, "currency": "KES",
 		"tax_inclusive": true, "negative_stock_policy": "warn_override",
 		"checkin_time": "14:00", "checkout_time": "11:00", "receipt_footer": "",
+		"tax_config_status": TaxStatusProvisional,
 	}
 	for k, v := range settings {
 		b, _ := json.Marshal(v)
@@ -100,8 +111,17 @@ func ApplyBaseData(ctx context.Context, tx pgx.Tx, o BaseOptions) error {
 	if name == "" {
 		name = "Standard rate"
 	}
-	if _, err := sr.UpsertTaxRate(ctx, setrepo.UpsertTaxRateParams{Code: "standard", Name: name, RateBp: int32(o.TaxRateBP)}); err != nil {
-		return fmt.Errorf("tax rate: %w", err)
+	// Three categories, because not every item is standard-rated. Products and room types must name one
+	// explicitly; there is no implicit default category.
+	categories := []setrepo.UpsertTaxRateParams{
+		{Code: "standard", Name: name, RateBp: int32(o.TaxRateBP), Treatment: "standard"},
+		{Code: "zero_rated", Name: "Zero-rated", RateBp: 0, Treatment: "zero_rated"},
+		{Code: "exempt", Name: "Exempt", RateBp: 0, Treatment: "exempt"},
+	}
+	for _, c := range categories {
+		if _, err := sr.UpsertTaxRate(ctx, c); err != nil {
+			return fmt.Errorf("tax category %s: %w", c.Code, err)
+		}
 	}
 	if err := sr.CreateCounterIfMissing(ctx, setrepo.CreateCounterIfMissingParams{DocType: "receipt", NextValue: o.ReceiptStart}); err != nil {
 		return err
@@ -167,7 +187,8 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool, o BootstrapOptions) (int
 	if err := ir.AssignRole(ctx, idrepo.AssignRoleParams{UserID: uid, RoleID: rid}); err != nil {
 		return 0, err
 	}
-	after, _ := json.Marshal(map[string]any{"username": o.Username, "role": "super_admin", "must_change_password": true})
+	after, _ := json.Marshal(map[string]any{"username": o.Username, "role": "super_admin", "must_change_password": true,
+		"standard_rate_bp": o.TaxRateBP, "tax_config_status": TaxStatusProvisional})
 	if err := ir.InsertAudit(ctx, idrepo.InsertAuditParams{
 		ActorLabel: "cli:bootstrap", Action: "bootstrap.super_admin_created", EntityType: "user",
 		EntityID: pgtype.Text{String: fmt.Sprint(uid), Valid: true}, AfterJson: after,

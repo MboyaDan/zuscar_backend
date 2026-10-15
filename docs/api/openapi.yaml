@@ -2,77 +2,307 @@ openapi: 3.0.3
 info:
   title: Zuscar API
   version: 0.0.0
-  description: >
-    Kept current every stage. Stage 4 documents only the platform endpoints. The planned route
-    inventory is docs/api/routes.csv. Money is always integer cents.
+  description: 'Kept current every stage. Stage 4 documents only the platform endpoints. The planned route inventory is docs/api/routes.csv.
+    Money is always integer cents.
+
+    '
 servers:
-  - url: http://localhost:8080
+- url: http://localhost:8080
 paths:
   /healthz:
     get:
       summary: Process liveness
       operationId: healthz
       responses:
-        "200":
+        '200':
           description: Process is up
           content:
             application/json:
-              schema: { type: object, required: [status], properties: { status: { type: string, enum: [ok] } } }
+              schema:
+                type: object
+                required:
+                - status
+                properties:
+                  status:
+                    type: string
+                    enum:
+                    - ok
   /api/v1/health:
     get:
       summary: Liveness through the web proxy
       description: Reachable at the web origin as /api/v1/health; used by the connection indicator.
       operationId: apiHealth
       responses:
-        "200":
+        '200':
           description: Backend is up
           content:
             application/json:
-              schema: { type: object, required: [status], properties: { status: { type: string, enum: [ok] } } }
+              schema:
+                type: object
+                required:
+                - status
+                properties:
+                  status:
+                    type: string
+                    enum:
+                    - ok
   /readyz:
     get:
       summary: Readiness (database reachable)
       operationId: readyz
       responses:
-        "200":
+        '200':
           description: Ready
           content:
             application/json:
-              schema: { type: object, required: [status], properties: { status: { type: string, enum: [ready] } } }
-        "503":
+              schema:
+                type: object
+                required:
+                - status
+                properties:
+                  status:
+                    type: string
+                    enum:
+                    - ready
+        '503':
           description: Database not reachable
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ErrorBody" }
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+  /api/v1/auth/login:
+    post:
+      summary: Sign in
+      description: Sets the HttpOnly session cookie and the script-readable CSRF cookie. Rejects a foreign Origin. Locks the
+        account after repeated failures.
+      responses:
+        '200':
+          description: Signed in
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: &id002
+                    type: object
+                    properties:
+                      id:
+                        type: integer
+                      username:
+                        type: string
+                      display_name:
+                        type: string
+                  must_change_password:
+                    type: boolean
+                  expires_at:
+                    type: string
+                    format: date-time
+        '400': &id001
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '401': *id001
+        '403': *id001
+        '423': *id001
+        '429': *id001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - username
+              - password
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+  /api/v1/auth/me:
+    get:
+      summary: Current user, roles and permissions
+      description: Permissions are read from the database on every request.
+      responses:
+        '200':
+          description: Current session
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: *id002
+                  roles:
+                    type: array
+                    items:
+                      type: string
+                  permissions:
+                    type: array
+                    items:
+                      type: string
+                  must_change_password:
+                    type: boolean
+                  auth_method:
+                    type: string
+                    enum:
+                    - password
+                    - pin
+                  session:
+                    type: object
+        '401': *id001
+      security:
+      - sessionCookie: []
+  /api/v1/auth/logout:
+    post:
+      summary: Sign out
+      description: Revokes the session and clears both cookies. Needs X-CSRF-Token.
+      responses:
+        '204':
+          description: Success
+        '401': *id001
+        '403': *id001
+      security:
+      - sessionCookie: []
+  /api/v1/auth/change-password:
+    post:
+      summary: Change own password
+      description: Ends every other session of the user. Wrong current passwords count toward lockout.
+      responses:
+        '204':
+          description: Success
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '423': *id001
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - current_password
+              - new_password
+              properties:
+                current_password:
+                  type: string
+                new_password:
+                  type: string
+                  minLength: 12
+                  maxLength: 128
+  /api/v1/auth/reauth:
+    post:
+      summary: Confirm password for sensitive actions
+      description: Valid for 5 minutes. PIN sessions cannot do this.
+      responses:
+        '204':
+          description: Success
+        '401': *id001
+        '403': *id001
+        '423': *id001
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - password
+              properties:
+                password:
+                  type: string
+  /api/v1/auth/pin-switch:
+    post:
+      summary: Hand the terminal to another floor user by PIN
+      description: Floor roles only. The new session never outlives the current one.
+      responses:
+        '200':
+          description: Switched
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: *id002
+                  must_change_password:
+                    type: boolean
+                  expires_at:
+                    type: string
+                    format: date-time
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '423': *id001
+        '429': *id001
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - username
+              - pin
+              properties:
+                username:
+                  type: string
+                pin:
+                  type: string
+                  pattern: ^[0-9]{4,8}$
 components:
   securitySchemes:
     sessionCookie:
       type: apiKey
       in: cookie
       name: zuscar_session
-      description: HttpOnly session cookie (arrives with Stage 6). State-changing requests also need X-CSRF-Token.
+      description: HttpOnly session cookie. State-changing requests also need the X-CSRF-Token header (value of the zuscar_csrf
+        cookie).
   parameters:
     IdempotencyKey:
       name: Idempotency-Key
       in: header
       required: true
-      schema: { type: string, minLength: 8, maxLength: 128 }
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
       description: Required on every route that creates money or stock effects (see routes.csv).
   schemas:
     ErrorBody:
       type: object
-      required: [error]
+      required:
+      - error
       properties:
         error:
           type: object
-          required: [code, message, request_id]
+          required:
+          - code
+          - message
+          - request_id
           properties:
-            code: { type: string }
-            message: { type: string }
-            request_id: { type: string }
+            code:
+              type: string
+            message:
+              type: string
+            request_id:
+              type: string
             fields:
               type: array
               items:
                 type: object
-                required: [field, message]
-                properties: { field: { type: string }, message: { type: string } }
+                required:
+                - field
+                - message
+                properties:
+                  field:
+                    type: string
+                  message:
+                    type: string

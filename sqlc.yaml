@@ -4,11 +4,11 @@ version: "2"
 sql:
   - engine: postgresql
     queries: database/queries/identity
-    schema: [database/migrations/0002_identity.sql, database/migrations/0004_settings.sql]
+    schema: [database/migrations/0002_identity.sql, database/migrations/0004_settings.sql, database/migrations/0005_tax_treatment.sql, database/migrations/0006_sessions_auth.sql]
     gen:
       go: { package: repository, out: internal/identity/repository, sql_package: pgx/v5 }
   - engine: postgresql
     queries: database/queries/settings
-    schema: [database/migrations/0002_identity.sql, database/migrations/0004_settings.sql]
+    schema: [database/migrations/0002_identity.sql, database/migrations/0004_settings.sql, database/migrations/0005_tax_treatment.sql, database/migrations/0006_sessions_auth.sql]
     gen:
       go: { package: repository, out: internal/settings/repository, sql_package: pgx/v5 }

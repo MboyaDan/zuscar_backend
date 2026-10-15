@@ -116,3 +116,8 @@ Migrations `0001`..`0004` in `database/migrations`. Differences from the plan ab
 - `system_settings`, `tax_rates`, `document_counters` exist now because bootstrap seeds them. Counter rows are never reset by re-running base data.
 - DEFERRED to Stage 25 with the deployment role design: Row Level Security and the split migrator/app database roles. Reason: with RLS enabled and no policies, a non-owner application role sees no rows, so the role model and policies must be designed together and tested on Supabase. Until then the API connects as the database owner and relies on the API's authorisation and the triggers.
 
+## 11. Stage 6 implementation notes
+- `0005_tax_treatment.sql`: `tax_rates.treatment` (standard, zero_rated, exempt); zero-rated and exempt require `rate_bp = 0`. Products and room types will reference a category with NOT NULL and no default. From Stage 11, `sale_items` also snapshots `tax_treatment` next to `tax_rate_bp`; reports break tax down by treatment. See `tax-configuration.md`.
+- `0006_sessions_auth.sql`: `sessions.csrf_hash` (SHA-256, bound to the session), `sessions.auth_method` (password or pin) and `sessions.reauth_at`. Pre-existing sessions are discarded (none could exist before login).
+- `0007_super_admin_guard_precision.sql`: the last-Super-Admin trigger now acts only for users who hold `super_admin` (and for removal of that role). The original version blocked deactivating anyone when no Super Admin existed; the Stage 6 tests found it.
+

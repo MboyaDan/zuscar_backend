@@ -2,6 +2,27 @@
 
 Every default below keeps the build moving and must be confirmed with the client before go-live. Stage = where it was first adopted.
 
+## Confirmation status (updated after Stage 6)
+| Status | IDs |
+|---|---|
+| Confirmed by the owner | S-13 (Business Manager does not hold roles.manage or permissions.assign) |
+| Changed by owner instruction | S-26 (tax rate default 1600 is provisional; open item T-01 is a go-live blocker) |
+| Retained at the owner's instruction | S-15 (extra permission keys, seeded; conflict check found none) |
+| OPEN, tracked explicitly | S-17, S-18, S-21 (see OPEN_ITEMS.md) |
+| Default in use, awaiting confirmation | every other ID below: A-01 to A-08, DQ-01 to DQ-18, S-01 to S-12, S-14, S-16, S-19, S-20, S-22 to S-25, S-27 to S-33 |
+
+## Interpretations of instructions (not assumptions about the venue)
+| ID | Interpretation made | Stage |
+|---|---|---|
+| I-01 | "Proceed with the remaining implementation tasks" (Stage 6 message) was read as "finish Stage 6 fully", not as permission to start Stage 7 | 6 |
+| I-02 | "Use 1600 as a provisional development default" was read as a default for the `bootstrap` flag and the dev seed only; production still needs the verification in `tax-configuration.md` | 6 |
+| I-03 | "Retain the seeded S-15 permission keys unless a conflict is identified" was read as: keep them and check for conflicts, which found none | 6 |
+| I-04 | The owner's "the patch workflow" is not defined anywhere in the chat; nothing was assumed about it. This update was delivered as a git patch applied with `git apply`, and the stage zips remain the normal deliverable | 6 |
+| I-05 | "Apply block" was read as the shell commands that apply the patch to the backend repo | 6 |
+| I-06 | "Docker for the backend only" was read as: no frontend Dockerfile or Compose service, and no frontend Docker CI job | 5 |
+| I-07 | The owner's variable names from the Mezani example (`FRONTEND_URL`, `NEXT_PUBLIC_APP_URL`) were adopted as the project's names, with `BACKEND_URL` chosen for the frontend's server-side setting | 5 |
+
+
 | ID | Default used | Stage | Who must confirm |
 |---|---|---|---|
 | DQ-01 | Business name "Zuscar Venue", text receipt header, supplied logo set | 0 | Owner |
@@ -64,7 +85,12 @@ Defaults chosen by the build to keep going. Each must be confirmed by the named 
 | S-23 | Request body limit 1 MiB; API refuses to start in production with insecure cookie, non-https origin or no database URL | 4 | Owner (technical) |
 | S-24 | Argon2id parameters: 64 MiB memory, 2 passes, 2 lanes, 16-byte salt, 32-byte key; re-check on the real Render instance size before go-live | 5 | Owner (technical) |
 | S-25 | Password policy: 12 to 128 characters, must not contain the username, not one repeated character, never the documented dev password | 5 | Owner |
-| S-26 | The tax rate is never defaulted: bootstrap requires `--tax-rate-bp` supplied by the operator after the accountant confirms it | 5 | Accountant |
+| S-26 | REVISED at Stage 6 by owner instruction: `--tax-rate-bp` defaults to 1600 (16.00%) as a PROVISIONAL development value, never a confirmed production tax configuration; three categories (standard, zero_rated, exempt) are created; `tax_config_status` stays `provisional_unverified` until verified (docs/tax-configuration.md, open item T-01) | 5, 6 | Accountant |
 | S-27 | Usernames are lowercase `a-z 0-9 . _ -`, 3 to 40 characters, never reused | 5 | Owner |
 | S-28 | Document counters created at bootstrap: receipt (start number supplied), order, folio, purchase, reservation, refund, transfer, count. Kitchen ticket counters are created per business day when first needed (S-05) | 5 | Accountant |
+| S-29 | Lockout: the 5th consecutive failed password locks the account for 15 minutes (423 account_locked with Retry-After); a correct password does not unlock early; success resets the counter; unknown usernames are throttled the same way but answer 429 rate_limited so existence is not revealed | 6 | Owner |
+| S-30 | CSRF (ADR-13 accepted): a random token bound to the session (only its SHA-256 stored) in a script-readable cookie and echoed in X-CSRF-Token, plus an Origin or Referer check against FRONTEND_URL on state-changing requests | 6 | Owner (technical) |
+| S-31 | PIN fast-switch: 4 to 8 digits, not all the same and not a run (1234, 4321); only users whose roles are all among cashier, waiter, bartender; 5 wrong PINs lock it for 15 minutes; the new session can never outlive the session it replaces; a PIN session cannot do password re-entry | 6 | Owner |
+| S-32 | Per-IP failed-login limit 50 per 15 minutes; proxy headers are ignored (TRUSTED_PROXIES empty) until the real Vercel and Render proxy addresses are verified on the deployed stack (Stage 25) | 6 | Owner (technical) |
+| S-33 | Session idle expiry is extended at most once per minute; password re-entry for sensitive actions stays valid for 5 minutes (S-16) | 6 | Owner |
 

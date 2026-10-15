@@ -14,7 +14,7 @@ Maps every acceptance criterion and non-negotiable rule to planned verification.
 | AC-07 | `TestAC07_ThirteenthAndFourteenthRoomViaAPI` (no code change), `TestAC07_ConcurrentBookingsOnlyOneWins`, `TestAC07_BackToBackAllowed`, `TestAC07_TentativeDoesNotBlock` | Go integration | Y | 20 | exclusion constraint spiked |
 | AC-08 | `TestAC08_FolioBalanceFromItemsPaymentsAdjustments`, `TestAC08_RoomChargeIsNotPayment`, `TestAC08_PosChargePostsOnce`, `TestAC08_CloseNeedsZeroBalanceOrWriteOff` | Go integration | Y | 21 | planned |
 | AC-09 | `TestAC09_ExpectedCashFromFixtures`, `TestAC09_VarianceStoredNotAbsorbed`, `TestAC09_PendingMpesaExcludedFromCash` | Go integration | Y | 12 | planned |
-| AC-10 | `TestAC10_EveryRouteDeniesWithoutPermission` (reads `docs/api/routes.csv`: 401 unauthenticated, 403 for each role lacking the key), `TestAC10_RouteTableMatchesRegisteredRoutes`, cases for sales.discount, inventory.override_negative, reports.export | Go integration | Y | 7, extended each stage | planned |
+| AC-10 | `TestAC10_EveryRouteDeniesWithoutPermission` (reads `docs/api/routes.csv`: 401 unauthenticated, 403 for each role lacking the key), `TestAC10_RouteTableMatchesRegisteredRoutes`, cases for sales.discount, inventory.override_negative, reports.export | Go integration | Y | 7, extended each stage | groundwork RAN at Stage 6: authentication (401 without a session) on every /auth route, permissions read from the database per request (`TestPermissionChangesApplyOnTheNextRequestWithoutRelogin`); permission middleware and the route-table test are Stage 7 |
 | AC-11 | `TestAC11_ManagerHasNoRoleAdminPermissions`, `TestAC11_RoleAdminWithoutSystemAdminCannotGrantIt`, `TestAC11_DBRejectsSystemAdminOnNonProtectedRole` | Go integration | Y | 5 (database), 7 (service) | database half RAN at Stage 5 (`TestAC11_DBRejectsSystemAdminOnNonProtectedRole`, `TestAC11_BusinessManagerTemplateHasNoRoleAdministration`, `TestProtectedRulesInTemplates`); service tests pending |
 | AC-12 | `TestAC12_LastSuperAdminCannotBeRemoved` (deactivate, role removal, delete), `TestAC12_ConcurrentDeactivationLeavesOne`, `TestAC12_DeactivationKeepsHistory` | Go integration | Y | 5 (database), 7 (service) | database half RAN at Stage 5, all three passing; a mutation check (lock removed) made the race test fail; service-level tests pending |
 | AC-13 | `TestAC13_RealMigrationsApplyToEmptyDatabaseAndRerunIsNoOp`, `TestAPINeverImportsSetupOrSeedCode` (API binary cannot reach migrate/seed code), CI job, deployment doc review | Go integration, CI, doc review | Y | 5, 26 | tests RAN at Stage 5; CI job written, not run |
@@ -60,3 +60,20 @@ Maps every acceptance criterion and non-negotiable rule to planned verification.
 | Counters never reset | `TestApplyBaseDataKeepsExistingCounters` |
 | Role templates match docs/rbac.md | `TestCatalogMatchesRBACDocument`, `TestRoutePermissionsExistInCatalog` |
 | Argon2id | `internal/identity/password` tests (round trip, unique salts, malformed hashes, rehash, policy) |
+
+## Stage 6 additions (all RAN against PostgreSQL 16.15 unless stated)
+| Requirement | Evidence |
+|---|---|
+| Argon2id, opaque server-side sessions, only SHA-256 stored (ADR-04) | `TestSessionAndCSRFTokensAreStoredOnlyAsHashes`, `TestLoginSetsHardenedCookiesAndMeReturnsRolesAndPermissions` (HttpOnly, SameSite=Lax, Secure) |
+| Permissions read from the database on each request | `TestPermissionChangesApplyOnTheNextRequestWithoutRelogin`, `TestInactiveUserCannotLoginAndExistingSessionStopsWorking` |
+| Login rate limiting and lockout | `TestLockoutAfterMaxAttemptsThenReleasesAfterWindow`, `TestSuccessfulLoginResetsTheFailureCounter`, `TestUnknownUsernamesAreThrottledToo`, `TestPerIPRateLimitIgnoresSpoofedForwardedHeaders`, `TestWrongPasswordAndUnknownUserGiveIdenticalResponses` |
+| Session expiry | `TestIdleAndAbsoluteExpiry` |
+| CSRF (ADR-13) | `TestCSRFProtection` (missing, wrong, other-session, forged pair, foreign Origin, foreign Referer, valid, script client), `TestLoginRejectsForeignOrigin`; mutation check: weakening the session-hash comparison makes `TestCSRFProtection` fail |
+| Forced password change at first login | `TestMustChangePasswordBlocksOrdinaryRoutesUntilChanged` |
+| Change password, other sessions ended, dev password refused | `TestChangePassword`, `TestWrongCurrentPasswordOnChangeCountsTowardLockout` |
+| Re-authentication window (S-16) | `TestReauthWindow` |
+| PIN fast-switch (A-07) | `TestPINSwitchHandsTheTerminalToAnotherFloorUser`, `TestPINSwitchIsBoundByTheOriginalAbsoluteExpiry` (mutation check: removing the bound fails it), `TestPINIsRefusedForNonFloorRolesWithoutRevealingWhoTheyAre`, `TestPINFormatRules`, `TestPINLockoutAndRecovery`, `TestPINAuditTrail`, `TestFloorRolesAreExactlyCashierWaiterBartender` |
+| Audit of security events, no secrets in logs | `TestAuditTrailRecordsSecurityEventsWithoutSecrets` (also checks ip and request id) |
+| Tax categories and provisional status (owner instruction) | `TestBootstrapCreatesOnlyTheMinimum` (three categories, `provisional_unverified`), `TestTaxCategoryConstraints`, `TestProvisionalRateConstantIsOwnerValue`, `TestTaxRateIsNotHardCoded` |
+| Bug found by tests | `TestGuardIgnoresUsersWhoAreNotSuperAdmins` (migration 0007) |
+| Not verified | Cookie, Origin and `Set-Cookie` behaviour through Vercel's rewrite on a deployed project; per-IP limiting behind real proxies (TRUSTED_PROXIES) |
