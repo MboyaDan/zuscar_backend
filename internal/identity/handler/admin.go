@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -30,6 +31,7 @@ func (h *Handler) RegisterAdmin(v1 *gin.RouterGroup) {
 	u.PUT("/:id/pin", h.requirePermission("users.update"), h.setPIN)
 	u.DELETE("/:id", h.requirePermission("users.delete"), h.deleteUser)
 	h.registerRoles(v1)
+	v1.GET("/audit-logs", h.Authenticate(false), h.CSRF(), h.requirePermission("audit.view"), h.listAuditLogs)
 }
 
 // requirePermission answers 403 when the signed-in user lacks the permission (401 is handled by Authenticate).
@@ -283,4 +285,62 @@ func (h *Handler) adminError(c *gin.Context, err error) {
 	default:
 		h.internal(c, err)
 	}
+}
+
+// listAuditLogs serves GET /audit-logs. Filters: action, entity_type, result, actor_id, from, to (RFC 3339), limit, cursor.
+func (h *Handler) listAuditLogs(c *gin.Context) {
+	bad := func(field, msg string) {
+		zhttp.WriteError(c, http.StatusBadRequest, "validation_failed", "Some fields are invalid.", zhttp.FieldError{Field: field, Message: msg})
+	}
+	f := service.AuditFilter{Action: c.Query("action"), EntityType: c.Query("entity_type"), Result: c.Query("result")}
+	if f.Result != "" && f.Result != "success" && f.Result != "denied" && f.Result != "failed" {
+		bad("result", "must be success, denied or failed")
+		return
+	}
+	for name, dst := range map[string]*int64{"actor_id": &f.ActorID} {
+		if v := c.Query(name); v != "" {
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || n < 1 {
+				bad(name, "must be a positive number")
+				return
+			}
+			*dst = n
+		}
+	}
+	for name, dst := range map[string]**time.Time{"from": &f.From, "to": &f.To} {
+		if v := c.Query(name); v != "" {
+			t, err := time.Parse(time.RFC3339, v)
+			if err != nil {
+				bad(name, "must be a date and time such as 2026-10-15T09:00:00+03:00")
+				return
+			}
+			*dst = &t
+		}
+	}
+	if v := c.Query("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 200 {
+			bad("limit", "must be 1 to 200")
+			return
+		}
+		f.Limit = n
+	}
+	if cur := c.Query("cursor"); cur != "" {
+		n, err := strconv.ParseInt(cur, 10, 64)
+		if err != nil || n < 1 {
+			bad("cursor", "is not valid")
+			return
+		}
+		f.BeforeID = n
+	}
+	items, next, err := h.svc.ListAuditLogs(c.Request.Context(), auth.From(c), f)
+	if err != nil {
+		h.adminError(c, err)
+		return
+	}
+	cursor := ""
+	if next != 0 {
+		cursor = strconv.FormatInt(next, 10)
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items, "next_cursor": cursor})
 }

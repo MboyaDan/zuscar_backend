@@ -27,7 +27,7 @@ Layout: `backend/internal/<module>/{handler,service,repository}`; shared code in
 | Module | Owns (tables, brief 8) |
 |---|---|
 | identity | users, roles, permissions, user_roles, role_permissions, sessions, audit_logs |
-| settings | system_settings, document_counters |
+| settings | system_settings, document_counters, tax_rates |
 | catalogue | categories, products, modifiers, price history |
 | orders | orders, order_items, kitchen_tickets, kitchen_ticket_items, tables |
 | sales | sales, sale_items, payments, payment_attempts, refunds, idempotency_records, receipt_records |
@@ -48,6 +48,7 @@ Rules:
 4. Cross-module atomic work (sale finalisation touches sales, inventory, folios, identity audit) uses one unit-of-work: the sales service opens the transaction and passes it, via a `Tx` argument, to other services' tx-aware methods. No module commits another module's transaction.
 5. Domain modules do not import `reports`; `reports` reads via its own queries.
 6. A test (Stage 4) will check import direction with `go list`.
+7. Audit rows from other modules go through `platform/audit.Recorder`, implemented by the identity service, inside the caller's transaction. The settings module receives the identity service's sign-in middleware and re-authentication check as arguments, so it never imports identity.
 
 ## 4. Request pipeline
 request id -> structured log -> panic recovery -> size limit -> session lookup (token hash) -> load permissions from DB -> CSRF check (state-changing) -> rate limit (login) -> idempotency check (money/stock POSTs) -> handler -> permission check in service -> transaction -> audit -> response. Errors use one body: code, message, field errors, request id (10.9).

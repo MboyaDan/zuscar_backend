@@ -173,3 +173,9 @@ Stage 1 (architecture pack, docs only): no input needed from you.
 - **Verified in the sandbox:** `TestRoleAdminLifecycle`, `TestAC11_RoleAdminWithoutSystemAdminCannotGrantIt`; mutation checks (escalation, protected permission, protected role) make them fail. CI for Stage 7a was reported green (go and docker jobs) by the owner.
 - **Decisions to confirm:** S-38, S-39.
 - **Next:** Stage 7b-2: settings, tax-rates, the tax-verified status change, audit-logs (security vs operational scope), and `TestAC10_EveryProtectedRouteDeniesWithoutPermission` over `routes.csv`.
+
+## Stage 7b-2: Settings, tax categories, audit log, AC-10 route table (done, backend only)
+- **Built:** `GET/PATCH /settings`, `GET/POST /tax-rates`, `PATCH /tax-rates/{id}`, `GET /audit-logs` (security vs operational scope); the tax-verified status change through `PATCH /settings` (records who and when, own audit action); settings module with `platform/audit.Recorder`; `TestAC10_EveryProtectedRouteDeniesWithoutPermission` reading `routes.csv`; OpenAPI paths and docs.
+- **Verified in the sandbox:** `TestSettingsAndTaxLifecycle`, `TestAuditLogsScope`, `TestAC10_EveryProtectedRouteDeniesWithoutPermission` pass; mutation checks (route unregistered, security scope removed, re-authentication removed, auto-unverify removed) make them fail.
+- **Decisions to confirm:** S-40 to S-42.
+- **Stage 7 is complete with this patch.** Next: Stage 8, the frontend shell (login, layout, permission-aware navigation, users and roles screens), which starts in the frontend repo against the openapi.yaml in this one.

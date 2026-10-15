@@ -226,3 +226,18 @@ DELETE FROM role_permissions WHERE role_id = $1 AND permission_id = $2;
 
 -- name: ListUsersWithRole :many
 SELECT u.id, u.username FROM user_roles ur JOIN users u ON u.id = ur.user_id WHERE ur.role_id = $1 ORDER BY u.username;
+
+-- name: ListAuditLogs :many
+SELECT a.id, a.occurred_at, a.actor_user_id, a.actor_label, a.action, a.entity_type, a.entity_id, a.reason, a.result,
+       a.before_json, a.after_json, a.request_id, a.ip
+FROM audit_logs a
+WHERE (sqlc.arg(before_id)::bigint = 0 OR a.id < sqlc.arg(before_id)::bigint)
+  AND (sqlc.arg(security_visible)::bool OR a.entity_type <> ALL(sqlc.arg(security_types)::text[]))
+  AND (sqlc.arg(action_filter)::text = '' OR a.action = sqlc.arg(action_filter)::text)
+  AND (sqlc.arg(entity_filter)::text = '' OR a.entity_type = sqlc.arg(entity_filter)::text)
+  AND (sqlc.arg(result_filter)::text = '' OR a.result = sqlc.arg(result_filter)::text)
+  AND (sqlc.arg(actor_filter)::bigint = 0 OR a.actor_user_id = sqlc.arg(actor_filter)::bigint)
+  AND (sqlc.narg(from_ts)::timestamptz IS NULL OR a.occurred_at >= sqlc.narg(from_ts)::timestamptz)
+  AND (sqlc.narg(to_ts)::timestamptz IS NULL OR a.occurred_at < sqlc.narg(to_ts)::timestamptz)
+ORDER BY a.id DESC
+LIMIT sqlc.arg(row_limit)::int;

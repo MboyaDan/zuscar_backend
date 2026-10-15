@@ -583,6 +583,80 @@ func (q *Queries) InsertLoginAttempt(ctx context.Context, arg InsertLoginAttempt
 	return err
 }
 
+const listAuditLogs = `-- name: ListAuditLogs :many
+SELECT a.id, a.occurred_at, a.actor_user_id, a.actor_label, a.action, a.entity_type, a.entity_id, a.reason, a.result,
+       a.before_json, a.after_json, a.request_id, a.ip
+FROM audit_logs a
+WHERE ($1::bigint = 0 OR a.id < $1::bigint)
+  AND ($2::bool OR a.entity_type <> ALL($3::text[]))
+  AND ($4::text = '' OR a.action = $4::text)
+  AND ($5::text = '' OR a.entity_type = $5::text)
+  AND ($6::text = '' OR a.result = $6::text)
+  AND ($7::bigint = 0 OR a.actor_user_id = $7::bigint)
+  AND ($8::timestamptz IS NULL OR a.occurred_at >= $8::timestamptz)
+  AND ($9::timestamptz IS NULL OR a.occurred_at < $9::timestamptz)
+ORDER BY a.id DESC
+LIMIT $10::int
+`
+
+type ListAuditLogsParams struct {
+	BeforeID        int64
+	SecurityVisible bool
+	SecurityTypes   []string
+	ActionFilter    string
+	EntityFilter    string
+	ResultFilter    string
+	ActorFilter     int64
+	FromTs          pgtype.Timestamptz
+	ToTs            pgtype.Timestamptz
+	RowLimit        int32
+}
+
+func (q *Queries) ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([]AuditLog, error) {
+	rows, err := q.db.Query(ctx, listAuditLogs,
+		arg.BeforeID,
+		arg.SecurityVisible,
+		arg.SecurityTypes,
+		arg.ActionFilter,
+		arg.EntityFilter,
+		arg.ResultFilter,
+		arg.ActorFilter,
+		arg.FromTs,
+		arg.ToTs,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuditLog
+	for rows.Next() {
+		var i AuditLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.OccurredAt,
+			&i.ActorUserID,
+			&i.ActorLabel,
+			&i.Action,
+			&i.EntityType,
+			&i.EntityID,
+			&i.Reason,
+			&i.Result,
+			&i.BeforeJson,
+			&i.AfterJson,
+			&i.RequestID,
+			&i.Ip,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPermissionKeysForRole = `-- name: ListPermissionKeysForRole :many
 SELECT p.key FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id WHERE rp.role_id = $1 ORDER BY p.key
 `
