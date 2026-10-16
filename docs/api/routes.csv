@@ -39,6 +39,7 @@ POST,/api/v1/products,catalogue.manage,-,9,
 PATCH,/api/v1/products/{id},catalogue.manage,-,9,
 PUT,/api/v1/products/{id}/price,catalogue.manage,-,9,"writes price_history, audited"
 PUT,/api/v1/products/{id}/availability,catalogue.manage,-,9,
+GET,/api/v1/products/{id}/price-history,catalogue.manage,-,9,"immutable price_history rows, newest first"
 GET,/api/v1/modifiers,catalogue.manage,-,9,
 POST,/api/v1/modifiers,catalogue.manage,-,9,
 PATCH,/api/v1/modifiers/{id},catalogue.manage,-,9,

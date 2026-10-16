@@ -15,6 +15,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	cathandler "zuscar/backend/internal/catalogue/handler"
+	catservice "zuscar/backend/internal/catalogue/service"
 	"zuscar/backend/internal/identity/handler"
 	"zuscar/backend/internal/identity/password"
 	"zuscar/backend/internal/identity/service"
@@ -104,6 +106,7 @@ func newEnv(t *testing.T, o ...envOpts) *testEnv {
 	h.Register(v1)
 	h.RegisterAdmin(v1)
 	sethandler.New(setservice.New(pool, clock, svc, svc.RecentReauth), log).Register(v1, h.Authenticate(false), h.CSRF())
+	cathandler.New(catservice.New(pool, svc), log).Register(v1, h.Authenticate(false), h.CSRF())
 	// Probe routes stand in for ordinary protected endpoints that later stages add.
 	v1.GET("/_probe", h.Authenticate(false), func(c *gin.Context) { c.JSON(200, gin.H{"ok": true}) })
 	v1.GET("/_sensitive", h.Authenticate(false), h.RequireRecentReauth(), func(c *gin.Context) { c.JSON(200, gin.H{"ok": true}) })
