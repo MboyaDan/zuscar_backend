@@ -154,3 +154,4 @@ GET,/api/v1/reports/expenses-profit,reports.view,-,23,?format=csv needs reports.
 GET,/api/v1/integrations/tax-invoices,reports.view,-,24,"stub, status only (DG-01)"
 POST,/api/v1/integrations/mpesa/callback,provider authenticity (unspecified),-,gated,NOT BUILT until DG-02 verified
 POST,/api/v1/integrations/etims/submit,system,-,gated,NOT BUILT until DG-01 verified
+GET,/api/v1/roles/assignable,users.update,-,8,roles the caller may grant (same rule as user role changes)

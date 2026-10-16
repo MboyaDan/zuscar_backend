@@ -130,3 +130,37 @@ func TestAC11_RoleAdminWithoutSystemAdminCannotGrantIt(t *testing.T) {
 		t.Fatal("system.admin ended up on a non-protected role")
 	}
 }
+
+func TestAssignableRolesFollowTheGrantRule(t *testing.T) {
+	e := newEnv(t)
+	e.exec(`INSERT INTO roles (code, name) VALUES ('role_admin', 'Role admin')`)
+	e.exec(`INSERT INTO role_permissions (role_id, permission_id) SELECT r.id, p.id FROM roles r, permissions p WHERE r.code = 'role_admin' AND p.key = 'roles.manage'`)
+	codes := func(j jar) map[string]bool {
+		w := e.do(req{method: "GET", path: "/api/v1/roles/assignable", jar: j})
+		expect(t, w, 200, "")
+		out := map[string]bool{}
+		for _, r := range decodeInto[struct {
+			Items []service.AssignableRole `json:"items"`
+		}](t, w).Items {
+			out[r.Code] = true
+		}
+		return out
+	}
+	e.addUser("manager1", false, "business_manager")
+	m := codes(e.mustLogin("manager1"))
+	for _, want := range []string{"cashier", "waiter"} {
+		if !m[want] {
+			t.Errorf("manager cannot pick %s", want)
+		}
+	}
+	for _, not := range []string{"super_admin", "role_admin"} {
+		if m[not] {
+			t.Errorf("manager is offered %s", not)
+		}
+	}
+	e.addUser("owner1", false, "super_admin")
+	if s := codes(e.mustLogin("owner1")); !s["super_admin"] || !s["role_admin"] || !s["cashier"] {
+		t.Errorf("super admin should see every role, got %v", s)
+	}
+	expect(t, e.do(req{method: "GET", path: "/api/v1/roles/assignable"}), 401, "")
+}
