@@ -20,6 +20,7 @@ func (h *Handler) registerRoles(v1 *gin.RouterGroup) {
 	r.PATCH("/:id", h.requirePermission("roles.manage"), h.updateRole)
 	r.DELETE("/:id", h.requirePermission("roles.manage"), h.deleteRole)
 	r.PUT("/:id/permissions", h.requirePermission("permissions.assign"), h.setRolePermissions)
+	r.GET("/assignable", h.requirePermission("users.update"), h.listAssignableRoles)
 	v1.GET("/permissions", append(guard, h.requirePermission("roles.manage"), h.listPermissions)...)
 }
 
@@ -121,4 +122,13 @@ func (h *Handler) setRolePermissions(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"role": role, "affected_users": affected})
+}
+
+func (h *Handler) listAssignableRoles(c *gin.Context) {
+	items, err := h.svc.ListAssignableRoles(c.Request.Context(), auth.From(c))
+	if err != nil {
+		h.adminError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
 }

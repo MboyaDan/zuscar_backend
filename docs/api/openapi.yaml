@@ -619,6 +619,30 @@ paths:
         '401': *id001
         '403': *id001
         '409': *id001
+  /api/v1/roles/assignable:
+    get:
+      summary: Roles the caller may grant
+      description: 'Needs permission users.update (not roles.manage). Applies the same rule as changing a user''s roles: protected roles only with system.admin, otherwise only roles whose permissions the caller already holds. Use it to fill a role picker.'
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: Grantable roles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        code: {type: string}
+                        name: {type: string}
+                        description: {type: string}
+        '401': *id001
+        '403': *id001
   /api/v1/roles/{id}:
     patch:
       summary: Change a role name and description

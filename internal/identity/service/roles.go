@@ -339,3 +339,36 @@ func sameSet(list []string, set map[string]bool) bool {
 	}
 	return true
 }
+
+// AssignableRole is what a user administrator sees when choosing roles for someone.
+type AssignableRole struct {
+	Code        string `json:"code"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// ListAssignableRoles returns the roles the caller could grant with the same rule SetUserRoles applies
+// (checkGrantable): protected roles only with system.admin, otherwise only roles whose permissions the caller
+// holds. It needs users.update, not roles.manage, so a Business Manager can fill in the role picker.
+func (s *Service) ListAssignableRoles(ctx context.Context, actor *auth.Principal) ([]AssignableRole, error) {
+	if err := require(actor, "users.update"); err != nil {
+		return nil, err
+	}
+	q := repository.New(s.pool)
+	rows, err := q.ListRoles(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AssignableRole, 0, len(rows))
+	for _, r := range rows {
+		err := checkGrantable(ctx, q, actor, []repository.ListRolesByCodesRow{{ID: r.ID, Code: r.Code, Name: r.Name, IsProtected: r.IsProtected}})
+		if errors.Is(err, ErrEscalation) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, AssignableRole{Code: r.Code, Name: r.Name, Description: r.Description})
+	}
+	return out, nil
+}

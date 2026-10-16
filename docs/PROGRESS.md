@@ -179,3 +179,7 @@ Stage 1 (architecture pack, docs only): no input needed from you.
 - **Verified in the sandbox:** `TestSettingsAndTaxLifecycle`, `TestAuditLogsScope`, `TestAC10_EveryProtectedRouteDeniesWithoutPermission` pass; mutation checks (route unregistered, security scope removed, re-authentication removed, auto-unverify removed) make them fail.
 - **Decisions to confirm:** S-40 to S-42.
 - **Stage 7 is complete with this patch.** Next: Stage 8, the frontend shell (login, layout, permission-aware navigation, users and roles screens), which starts in the frontend repo against the openapi.yaml in this one.
+
+## Stage 8, backend part: assignable roles
+- **Built:** `GET /api/v1/roles/assignable` (users.update): the roles the caller may grant, by the same rule as user role changes, so a Business Manager (no `roles.manage`) can fill in a role picker. Row added to `routes.csv` (stage 8); the AC-10 route-table test now covers stage 8 rows. Test `TestAssignableRolesFollowTheGrantRule`; mutation check (filter removed) fails it.
+- **Frontend expectation:** the users screens call this endpoint for the role picker; `GET /roles` is used only by the roles screen (roles.manage).
