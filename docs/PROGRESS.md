@@ -190,3 +190,10 @@ Stage 1 (architecture pack, docs only): no input needed from you.
 - **Frontend expectation (no backend change):** uses `GET/POST /roles`, `PATCH/DELETE /roles/{id}`, `PUT /roles/{id}/permissions`, `GET /permissions`, `GET /audit-logs`, `GET/PATCH /settings`, `GET /tax-rates` exactly as in `openapi.yaml`. The checklist ticks are not stored; the verification is recorded by the backend (who, when, audit event `settings.tax_config_verified`).
 - **Assumptions used:** Settings is shown in the menu to `system.admin` only (the API lets any signed-in user read settings); the checklist text is a copy of `docs/tax-configuration.md` and must change with it.
 - **Stage 8 is complete with this patch.** Next: Stage 9 (catalogue: categories and products, with an explicit tax category on every product).
+
+## Stage 9a (backend): catalogue API
+- **Built:** migration `0008_catalogue.sql` (categories, products, price_history, modifiers, product_modifiers); sqlc queries; `internal/catalogue` (service, handler); routes `GET /menu` (orders.manage) and, with catalogue.manage, categories (list, add, change), products (list with filters, add, change, price, availability, price-history), modifiers (list, add, change). `openapi.yaml` and `routes.csv` updated (one added row: `GET /products/{id}/price-history`).
+- **Rules held by the database and tested:** a product's module must match its category's module (composite foreign key); `price_history` rejects UPDATE, DELETE and TRUNCATE; a product must name an active tax category, with no default; prices are integer cents, 0 to 100,000,000.
+- **Audit events:** category.created/updated, product.created/updated/price_changed/availability_changed, modifier.created/updated.
+- **Not in 9a:** `track_stock` and `inventory_item_id` on products (they arrive with inventory in Stage 17); the seeded sample menu and the catalogue screens (9b and 9c).
+- **You must run a migration:** `docker compose run --rm backend /app/migrate up` (0008) before the frontend catalogue screens are merged.

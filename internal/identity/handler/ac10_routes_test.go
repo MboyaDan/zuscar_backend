@@ -40,17 +40,17 @@ func TestAC10_EveryProtectedRouteDeniesWithoutPermission(t *testing.T) {
 	special := map[string]bool{"public": true, "terminal session": true, "system": true, "provider authenticity (unspecified)": true}
 	for _, r := range recs[1:] {
 		stage, _ := strconv.Atoi(r[4])
-		if stage > 8 || special[r[2]] {
+		if stage > 9 || special[r[2]] {
 			continue
 		}
 		// Stage 6 session routes (logout, change-password) would end the shared test session; their guards are
-		// covered by the stage 6 tests. Stage 7 and 8 routes and every permission-named route are checked here.
+		// covered by the stage 6 tests. Stage 7, 8 and 9 routes and every permission-named route are checked here.
 		if stage < 7 && r[2] == "authenticated" {
 			continue
 		}
 		routes = append(routes, route{r[0], strings.NewReplacer("{id}", "1").Replace(r[1]), r[2]})
 	}
-	if len(routes) < 23 { // the 22 stage 7 rows plus the stage 8 row at least
+	if len(routes) < 35 { // stage 7, 8 and 9 rows
 		t.Fatalf("only %d routes read from routes.csv", len(routes))
 	}
 

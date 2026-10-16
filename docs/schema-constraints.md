@@ -43,7 +43,7 @@ Super Admin guards (AC-11, AC-12; full rules in `rbac.md`):
 |---|---|
 | categories | module IN (restaurant, bar); name unique per module; sort_order; active. |
 | products | category_id FK; name; sku nullable unique; module; `price_cents >= 0`; tax_rate_id FK; is_available; track_stock; inventory_item_id FK nullable; kitchen_routed bool. CHECK `track_stock = (inventory_item_id IS NOT NULL)`. Price edits write price_history and are audited. |
-| price_history | product_id, price_cents, effective_from, changed_by. Immutable. |
+| price_history | product_id, price_cents, effective_from, changed_by. Immutable (trigger rejects UPDATE, DELETE, TRUNCATE). Stage 9a: `products` has a composite FK (category_id, module) to `categories (id, module)`, so a product cannot sit in another module's category; `track_stock` and `inventory_item_id` are added in Stage 17. |
 | modifiers / product_modifiers | modifier name, `price_delta_cents` (signed), active; link table PK (product_id, modifier_id). |
 | dining_tables | label unique, seats, active. Brief calls them tables; renamed to avoid the SQL keyword. |
 | orders | order_no (counter), order_type IN (dine_in, takeaway), table_id FK nullable (required for dine_in), status IN (open, sent, finalised, cancelled), opened_by, waiter_id, note, version int (optimistic lock). Edits only while open or sent: enforced in service and by trigger rejecting changes to finalised rows (S-07). Index (status), (table_id) WHERE status IN (open, sent). |

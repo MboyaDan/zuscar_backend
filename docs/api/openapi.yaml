@@ -944,6 +944,265 @@ paths:
         '400': *id001
         '401': *id001
         '403': *id001
+  /api/v1/menu:
+    get:
+      summary: What can be sold now
+      description: 'Needs permission orders.manage. Active categories with their available products and active modifiers.'
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {categories: {type: array, items: {type: object}}}}
+        '401': *id001
+        '403': *id001
+  /api/v1/categories:
+    get:
+      summary: List categories
+      description: 'Needs permission catalogue.manage. '
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/Category'}}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+    post:
+      summary: Add a category
+      description: 'Needs permission catalogue.manage. Module is fixed at creation. Name is unique per module (409 conflict).'
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [module, name], properties: {module: {type: string, enum: [restaurant, bar]}, name: {type: string}, sort_order: {type: integer}}}
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {category: {$ref: '#/components/schemas/Category'}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '409': *id001
+  /api/v1/categories/{id}:
+    patch:
+      summary: Change a category
+      description: 'Needs permission catalogue.manage. '
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, properties: {name: {type: string}, sort_order: {type: integer}, active: {type: boolean}}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {category: {$ref: '#/components/schemas/Category'}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/products:
+    get:
+      summary: List products
+      description: 'Needs permission catalogue.manage. Filters: category_id, module, available, q (name or SKU).'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: category_id, in: query, schema: {type: integer, format: int64}}
+      - {name: module, in: query, schema: {type: string, enum: [restaurant, bar]}}
+      - {name: available, in: query, schema: {type: boolean}}
+      - {name: q, in: query, schema: {type: string}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/Product'}}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+    post:
+      summary: Add a product
+      description: 'Needs permission catalogue.manage. category_id, price_cents, tax_rate_id and kitchen_routed are required: there is no default tax category. The module comes from the category. The opening price is the first price_history row.'
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [category_id, name, price_cents, tax_rate_id, kitchen_routed], properties: {category_id: {type: integer, format: int64}, name: {type: string}, sku: {type: string}, price_cents: {type: integer, format: int64, minimum: 0}, tax_rate_id: {type: integer, format: int64}, kitchen_routed: {type: boolean}, modifier_ids: {type: array, items: {type: integer, format: int64}}}}
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {product: {$ref: '#/components/schemas/Product'}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '409': *id001
+  /api/v1/products/{id}:
+    patch:
+      summary: Change a product
+      description: 'Needs permission catalogue.manage. Not the price or availability (own endpoints). A product may only move to a category of the same module. An empty sku clears it; modifier_ids replaces the set.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, properties: {category_id: {type: integer, format: int64}, name: {type: string}, sku: {type: string}, tax_rate_id: {type: integer, format: int64}, kitchen_routed: {type: boolean}, modifier_ids: {type: array, items: {type: integer, format: int64}}}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {product: {$ref: '#/components/schemas/Product'}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/products/{id}/price:
+    put:
+      summary: Change the price
+      description: 'Needs permission catalogue.manage. Adds an immutable price_history row and an audit entry; the same price again changes nothing.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [price_cents], properties: {price_cents: {type: integer, format: int64, minimum: 0}}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {product: {$ref: '#/components/schemas/Product'}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+  /api/v1/products/{id}/availability:
+    put:
+      summary: Mark a product available or not
+      description: 'Needs permission catalogue.manage. '
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [is_available], properties: {is_available: {type: boolean}}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {product: {$ref: '#/components/schemas/Product'}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+  /api/v1/products/{id}/price-history:
+    get:
+      summary: Price history, newest first
+      description: 'Needs permission catalogue.manage. '
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {items: {type: array, items: {type: object, properties: {price_cents: {type: integer, format: int64}, effective_from: {type: string, format: date-time}, changed_by: {type: integer, format: int64, nullable: true}}}}}}
+        '401': *id001
+        '403': *id001
+        '404': *id001
+  /api/v1/modifiers:
+    get:
+      summary: List modifiers
+      description: 'Needs permission catalogue.manage. '
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/Modifier'}}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+    post:
+      summary: Add a modifier
+      description: 'Needs permission catalogue.manage. price_delta_cents may be negative or zero. Name is unique (409 conflict).'
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [name], properties: {name: {type: string}, price_delta_cents: {type: integer, format: int64}}}
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {modifier: {$ref: '#/components/schemas/Modifier'}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '409': *id001
+  /api/v1/modifiers/{id}:
+    patch:
+      summary: Change a modifier
+      description: 'Needs permission catalogue.manage. '
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, properties: {name: {type: string}, price_delta_cents: {type: integer, format: int64}, active: {type: boolean}}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {modifier: {$ref: '#/components/schemas/Modifier'}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
 components:
   securitySchemes:
     sessionCookie:
@@ -963,6 +1222,37 @@ components:
         maxLength: 128
       description: Required on every route that creates money or stock effects (see routes.csv).
   schemas:
+    Category:
+      type: object
+      properties:
+        id: {type: integer, format: int64}
+        module: {type: string, enum: [restaurant, bar]}
+        name: {type: string}
+        sort_order: {type: integer}
+        active: {type: boolean}
+    Modifier:
+      type: object
+      properties:
+        id: {type: integer, format: int64}
+        name: {type: string}
+        price_delta_cents: {type: integer, format: int64}
+        active: {type: boolean}
+    Product:
+      type: object
+      properties:
+        id: {type: integer, format: int64}
+        category_id: {type: integer, format: int64}
+        category_name: {type: string}
+        module: {type: string, enum: [restaurant, bar]}
+        name: {type: string}
+        sku: {type: string, nullable: true}
+        price_cents: {type: integer, format: int64}
+        tax_rate: {type: object, properties: {id: {type: integer, format: int64}, code: {type: string}, name: {type: string}, rate_bp: {type: integer}, treatment: {type: string, enum: [standard, zero_rated, exempt]}}}
+        is_available: {type: boolean}
+        kitchen_routed: {type: boolean}
+        modifier_ids: {type: array, items: {type: integer, format: int64}}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
     TaxRate:
       type: object
       properties:

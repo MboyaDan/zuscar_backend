@@ -12,6 +12,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	cathandler "zuscar/backend/internal/catalogue/handler"
+	catservice "zuscar/backend/internal/catalogue/service"
 	idhandler "zuscar/backend/internal/identity/handler"
 	idservice "zuscar/backend/internal/identity/service"
 	"zuscar/backend/internal/platform/config"
@@ -59,6 +61,7 @@ func main() {
 			h.Register(v1)
 			h.RegisterAdmin(v1)
 			sethandler.New(setservice.New(pool, svc.Clock(), svc, svc.RecentReauth), log).Register(v1, h.Authenticate(false), h.CSRF())
+			cathandler.New(catservice.New(pool, svc), log).Register(v1, h.Authenticate(false), h.CSRF())
 			return nil
 		}
 	} else {
