@@ -199,8 +199,17 @@ Stage 1 (architecture pack, docs only): no input needed from you.
 - **You must run a migration:** `docker compose run --rm backend /app/migrate up` (0008) before the frontend catalogue screens are merged.
 
 ## Stage 9b (backend): sample menu in seed-dev
-- **Built:** `seed-dev` now also adds a fake sample menu (restaurant: Mains, Sides, Hot drinks; bar: Soft drinks, Beer, Spirits; 10 products with SKUs `DEV-...`, 6 modifiers linked to products, an opening price_history row each). It only runs when the database has no categories, so a repeat run never duplicates or resets edits. Bootstrap (production-style) data is unchanged: no menu.
+- **Built:** `seed-dev` now also adds a fake sample menu (restaurant: Mains, Sides, Hot drinks; bar: Soft drinks, Beer, Spirits; 11 products with SKUs `DEV-...`, 6 modifiers linked to products, an opening price_history row each). It only runs when the database has no categories, so a repeat run never duplicates or resets edits. Bootstrap (production-style) data is unchanged: no menu.
 - **Dev placeholder:** every sample product uses the `standard` tax category only because a product must name one. It is not a tax decision (`docs/tax-configuration.md`).
 - **Tests:** `TestSeedAddsSampleMenuOnceAndConsistently` (size, fake SKUs, tax category and price on every row, price history, repeat-run safety); also checked by breaking the re-run guard on purpose, which made it fail.
 - **Traceability:** no acceptance criterion maps to the catalogue, so `docs/traceability.md` is unchanged.
 - **Next:** 9c, the catalogue screens (frontend).
+
+## Stage 9c (frontend repo): catalogue screens
+- **Built (frontend):** `/catalogue` with three tabs. Products: search, filter by module, category and availability; add and edit; change price (shows the earlier prices); one-press Available or Sold out. Categories: add, edit, order, deactivate. Modifiers: add, edit, signed price change, deactivate. Menu entry "Catalogue" for `catalogue.manage`.
+- **Tax and kitchen are never defaulted:** the product form starts with "Choose a tax category" and "Choose" for the kitchen decision, and the Add button stays disabled until both are chosen.
+- **Money:** `lib/money.ts` turns text into whole cents without floating point (rejects more than two decimals, negatives for prices, and amounts above KES 1,000,000).
+- **Frontend expectation (no backend change):** uses exactly the Stage 9a routes in `openapi.yaml`. Checked against a real API with the seeded menu: login through the frontend proxy, lists (6 categories, 6 modifiers, 11 products), edit, price (history shows both prices), availability and the three create calls.
+- **Also fixed here:** the 9b notes said 10 sample products; the seed adds 11.
+- **Not covered:** no browser or screen-reader pass yet, and the repo has no frontend test runner.
+- **Next:** Stage 10 (tables, orders, kitchen tickets).
