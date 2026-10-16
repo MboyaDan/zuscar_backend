@@ -197,3 +197,10 @@ Stage 1 (architecture pack, docs only): no input needed from you.
 - **Audit events:** category.created/updated, product.created/updated/price_changed/availability_changed, modifier.created/updated.
 - **Not in 9a:** `track_stock` and `inventory_item_id` on products (they arrive with inventory in Stage 17); the seeded sample menu and the catalogue screens (9b and 9c).
 - **You must run a migration:** `docker compose run --rm backend /app/migrate up` (0008) before the frontend catalogue screens are merged.
+
+## Stage 9b (backend): sample menu in seed-dev
+- **Built:** `seed-dev` now also adds a fake sample menu (restaurant: Mains, Sides, Hot drinks; bar: Soft drinks, Beer, Spirits; 10 products with SKUs `DEV-...`, 6 modifiers linked to products, an opening price_history row each). It only runs when the database has no categories, so a repeat run never duplicates or resets edits. Bootstrap (production-style) data is unchanged: no menu.
+- **Dev placeholder:** every sample product uses the `standard` tax category only because a product must name one. It is not a tax decision (`docs/tax-configuration.md`).
+- **Tests:** `TestSeedAddsSampleMenuOnceAndConsistently` (size, fake SKUs, tax category and price on every row, price history, repeat-run safety); also checked by breaking the re-run guard on purpose, which made it fail.
+- **Traceability:** no acceptance criterion maps to the catalogue, so `docs/traceability.md` is unchanged.
+- **Next:** 9c, the catalogue screens (frontend).

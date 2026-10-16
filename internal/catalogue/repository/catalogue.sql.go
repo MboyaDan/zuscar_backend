@@ -11,6 +11,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countCategories = `-- name: CountCategories :one
+SELECT count(*) FROM categories
+`
+
+func (q *Queries) CountCategories(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countCategories)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countModifiersByID = `-- name: CountModifiersByID :one
 SELECT count(*) FROM modifiers WHERE id = ANY($1::bigint[])
 `
@@ -196,6 +207,17 @@ func (q *Queries) GetTaxRateForProduct(ctx context.Context, id int64) (GetTaxRat
 	var i GetTaxRateForProductRow
 	err := row.Scan(&i.ID, &i.Active)
 	return i, err
+}
+
+const getTaxRateIDByCode = `-- name: GetTaxRateIDByCode :one
+SELECT id FROM tax_rates WHERE code = $1
+`
+
+func (q *Queries) GetTaxRateIDByCode(ctx context.Context, code string) (int64, error) {
+	row := q.db.QueryRow(ctx, getTaxRateIDByCode, code)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const insertPriceHistory = `-- name: InsertPriceHistory :exec

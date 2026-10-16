@@ -70,3 +70,41 @@ func TestBootstrapRefusesSeededDatabase(t *testing.T) {
 		t.Fatalf("want ErrAlreadyBootstrapped, got %v", err)
 	}
 }
+
+func TestSeedAddsSampleMenuOnceAndConsistently(t *testing.T) {
+	pool := testdb.New(t)
+	ctx := context.Background()
+	if _, err := devseed.Run(ctx, pool, config.EnvDevelopment); err != nil {
+		t.Fatal(err)
+	}
+	count := func(sql string) int {
+		var n int
+		if err := pool.QueryRow(ctx, sql).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	products := count(`SELECT count(*) FROM products`)
+	if products < 10 || count(`SELECT count(*) FROM categories`) < 5 || count(`SELECT count(*) FROM modifiers`) < 4 {
+		t.Fatalf("sample menu too small: %d products", products)
+	}
+	if n := count(`SELECT count(*) FROM products WHERE sku NOT LIKE 'DEV-%' OR price_cents <= 0 OR tax_rate_id IS NULL`); n != 0 {
+		t.Fatalf("%d products are not clearly fake or have no price or tax category", n)
+	}
+	if count(`SELECT count(*) FROM price_history`) != products {
+		t.Fatal("every seeded product needs its opening price_history row")
+	}
+	if count(`SELECT count(*) FROM products WHERE is_available`) != products {
+		t.Fatal("seeded products should start available")
+	}
+	// A repeat run (even after someone edits the menu) adds and changes nothing.
+	if _, err := pool.Exec(ctx, `UPDATE products SET is_available = false WHERE sku = 'DEV-R001'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := devseed.Run(ctx, pool, config.EnvDevelopment); err != nil {
+		t.Fatal(err)
+	}
+	if count(`SELECT count(*) FROM products`) != products || count(`SELECT count(*) FROM products WHERE is_available = false`) != 1 {
+		t.Fatal("a second seed run must not duplicate or reset the menu")
+	}
+}

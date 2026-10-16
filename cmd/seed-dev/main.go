@@ -36,5 +36,6 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("seed-dev: created %d fictional users (all dev.*). Dev-only password for every one: %s\n", n, devseed.Password)
+	fmt.Println("A small fake menu is added when the database has no categories yet (SKUs start with DEV-).")
 	fmt.Println("This data is FAKE. Never use it in production.")
 }
