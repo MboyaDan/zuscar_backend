@@ -80,3 +80,9 @@ DELETE FROM product_modifiers WHERE product_id = $1;
 
 -- name: InsertProductModifier :exec
 INSERT INTO product_modifiers (product_id, modifier_id) VALUES ($1, $2) ON CONFLICT DO NOTHING;
+
+-- name: GetTaxRateIDByCode :one
+SELECT id FROM tax_rates WHERE code = $1;
+
+-- name: CountCategories :one
+SELECT count(*) FROM categories;
