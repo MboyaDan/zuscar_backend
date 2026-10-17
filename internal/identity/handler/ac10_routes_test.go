@@ -40,17 +40,17 @@ func TestAC10_EveryProtectedRouteDeniesWithoutPermission(t *testing.T) {
 	special := map[string]bool{"public": true, "terminal session": true, "system": true, "provider authenticity (unspecified)": true}
 	for _, r := range recs[1:] {
 		stage, _ := strconv.Atoi(r[4])
-		if stage > 9 || special[r[2]] {
+		if stage > 10 || pendingStage10b(r[1]) || special[r[2]] {
 			continue
 		}
 		// Stage 6 session routes (logout, change-password) would end the shared test session; their guards are
-		// covered by the stage 6 tests. Stage 7, 8 and 9 routes and every permission-named route are checked here.
+		// covered by the stage 6 tests. Stage 7, 8, 9 and 10a routes and every permission-named route are checked here.
 		if stage < 7 && r[2] == "authenticated" {
 			continue
 		}
 		routes = append(routes, route{r[0], strings.NewReplacer("{id}", "1").Replace(r[1]), r[2]})
 	}
-	if len(routes) < 35 { // stage 7, 8 and 9 rows
+	if len(routes) < 45 { // stage 7 to 10a rows
 		t.Fatalf("only %d routes read from routes.csv", len(routes))
 	}
 
@@ -91,4 +91,9 @@ func TestAC10_EveryProtectedRouteDeniesWithoutPermission(t *testing.T) {
 			}
 		}
 	}
+}
+
+// pendingStage10b lists the stage 10 routes that arrive with Stage 10b (kitchen tickets). Delete this when it lands.
+func pendingStage10b(path string) bool {
+	return strings.Contains(path, "/send-to-kitchen") || strings.Contains(path, "/kitchen/")
 }

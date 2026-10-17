@@ -103,5 +103,8 @@ func Run(ctx context.Context, pool *pgxpool.Pool, env config.Env) (created int, 
 	if _, err := seedMenu(ctx, tx, ir); err != nil {
 		return 0, err
 	}
+	if err := seedTables(ctx, tx); err != nil {
+		return 0, err
+	}
 	return created, tx.Commit(ctx)
 }

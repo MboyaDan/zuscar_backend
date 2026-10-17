@@ -16,6 +16,8 @@ import (
 	catservice "zuscar/backend/internal/catalogue/service"
 	idhandler "zuscar/backend/internal/identity/handler"
 	idservice "zuscar/backend/internal/identity/service"
+	orderhandler "zuscar/backend/internal/orders/handler"
+	orderservice "zuscar/backend/internal/orders/service"
 	"zuscar/backend/internal/platform/config"
 	"zuscar/backend/internal/platform/db"
 	zhttp "zuscar/backend/internal/platform/http"
@@ -62,6 +64,7 @@ func main() {
 			h.RegisterAdmin(v1)
 			sethandler.New(setservice.New(pool, svc.Clock(), svc, svc.RecentReauth), log).Register(v1, h.Authenticate(false), h.CSRF())
 			cathandler.New(catservice.New(pool, svc), log).Register(v1, h.Authenticate(false), h.CSRF())
+			orderhandler.New(orderservice.New(pool, svc), log).Register(v1, h.Authenticate(false), h.CSRF())
 			return nil
 		}
 	} else {
