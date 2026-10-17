@@ -9,6 +9,7 @@ import (
 
 	"zuscar/backend/internal/catalogue/repository"
 	idrepo "zuscar/backend/internal/identity/repository"
+	ordersrepo "zuscar/backend/internal/orders/repository"
 )
 
 // A small FAKE menu so the catalogue and order screens have something to show. Prices are invented. Every product
@@ -106,4 +107,18 @@ func seedMenu(ctx context.Context, tx pgx.Tx, ir *idrepo.Queries) (int, error) {
 	}
 	after, _ := json.Marshal(map[string]any{"categories": len(sampleMenu), "products": count, "modifiers": len(sampleModifiers)})
 	return count, ir.InsertAudit(ctx, idrepo.InsertAuditParams{ActorLabel: "cli:seed-dev", Action: "devseed.menu_created", EntityType: "catalogue", AfterJson: after})
+}
+
+// seedTables adds six fake dining tables once; a database that already has any table is left alone.
+func seedTables(ctx context.Context, tx pgx.Tx) error {
+	n, err := ordersrepo.New(tx).CountTables(ctx)
+	if err != nil || n > 0 {
+		return err
+	}
+	for i, seats := range []int32{2, 2, 4, 4, 6, 8} {
+		if _, err := ordersrepo.New(tx).CreateTable(ctx, ordersrepo.CreateTableParams{Label: "Table " + string(rune('1'+i)), Seats: seats}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

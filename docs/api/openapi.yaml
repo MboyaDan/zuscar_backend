@@ -1203,6 +1203,218 @@ paths:
         '403': *id001
         '404': *id001
         '409': *id001
+  /api/v1/tables:
+    get:
+      summary: List dining tables
+      description: 'Needs permission orders.manage. open_order_id is the first open or sent order at the table, if any.'
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/DiningTable'}}}}
+        '401': *id001
+        '403': *id001
+    post:
+      summary: Add a dining table
+      description: 'Needs permission catalogue.manage. Label is unique (409 conflict).'
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [label, seats], properties: {label: {type: string}, seats: {type: integer, minimum: 1, maximum: 100}}}
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {table: {$ref: '#/components/schemas/DiningTable'}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '409': *id001
+  /api/v1/tables/{id}:
+    patch:
+      summary: Change a dining table
+      description: 'Needs permission catalogue.manage.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, properties: {label: {type: string}, seats: {type: integer}, active: {type: boolean}}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {table: {$ref: '#/components/schemas/DiningTable'}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/orders:
+    get:
+      summary: List orders
+      description: 'Needs permission orders.manage. Newest first. Roles other than Super Admin, Business Manager, Cashier and Accountant / Auditor see only the orders they opened (assumption S-43). Filters: status, table_id; paging: limit (default 50, max 100) and cursor (next_cursor of the previous page).'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: status, in: query, schema: {type: string, enum: [open, sent, finalised, cancelled]}}
+      - {name: table_id, in: query, schema: {type: integer, format: int64}}
+      - {name: limit, in: query, schema: {type: integer}}
+      - {name: cursor, in: query, schema: {type: integer, format: int64}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/OrderSummary'}}, next_cursor: {type: string}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+    post:
+      summary: Open an order
+      description: 'Needs permission orders.manage. A dine-in order needs an active table; a takeaway order has none. The order number comes from a gapless counter. The Idempotency-Key header is honoured from Stage 10b.'
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [order_type], properties: {order_type: {type: string, enum: [dine_in, takeaway]}, table_id: {type: integer, format: int64}, note: {type: string, maxLength: 200}}}
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {order: {$ref: '#/components/schemas/Order'}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+  /api/v1/orders/{id}:
+    get:
+      summary: Get an order with its items
+      description: 'Needs permission orders.manage. An order opened by someone else is 404 for roles limited to their own orders.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {order: {$ref: '#/components/schemas/Order'}}}
+        '401': *id001
+        '403': *id001
+        '404': *id001
+  /api/v1/orders/{id}/items:
+    post:
+      summary: Add an item
+      description: 'Needs permission orders.manage. The price is taken from the catalogue on the server; a client-supplied price is rejected as an unknown field. The product must be available (409 product_unavailable) and each modifier offered by it.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [product_id, qty], properties: {product_id: {type: integer, format: int64}, qty: {type: integer, minimum: 1, maximum: 999}, note: {type: string, maxLength: 200}, modifier_ids: {type: array, items: {type: integer, format: int64}}, expected_version: {type: integer, description: 'the order version the screen showed; a different current version returns 409 order_changed'}}}
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {order: {$ref: '#/components/schemas/Order'}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/orders/{id}/items/{itemId}:
+    patch:
+      summary: Change an item's quantity or note
+      description: 'Needs permission orders.manage. Order must be open or sent. A cancelled item cannot be changed (409 item_cancelled).'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      - {name: itemId, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, properties: {qty: {type: integer}, note: {type: string}, expected_version: {type: integer, description: 'the order version the screen showed; a different current version returns 409 order_changed'}}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {order: {$ref: '#/components/schemas/Order'}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/orders/{id}/items/{itemId}/cancel:
+    post:
+      summary: Cancel an item
+      description: 'Needs permission orders.manage. A reason is required and the cancellation is audited. Cancelling a line that was already sent will raise a kitchen ticket in Stage 10b.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      - {name: itemId, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [reason], properties: {reason: {type: string, maxLength: 200}, expected_version: {type: integer, description: 'the order version the screen showed; a different current version returns 409 order_changed'}}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {order: {$ref: '#/components/schemas/Order'}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/orders/{id}/cancel:
+    post:
+      summary: Cancel an order
+      description: 'Needs permission orders.manage. A reason is required and the cancellation is audited. An order already sent to the kitchen returns 409 order_sent until Stage 10b adds kitchen cancel tickets.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [reason], properties: {reason: {type: string, maxLength: 200}, expected_version: {type: integer, description: 'the order version the screen showed; a different current version returns 409 order_changed'}}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {order: {$ref: '#/components/schemas/Order'}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
 components:
   securitySchemes:
     sessionCookie:
@@ -1222,6 +1434,53 @@ components:
         maxLength: 128
       description: Required on every route that creates money or stock effects (see routes.csv).
   schemas:
+    DiningTable:
+      type: object
+      properties:
+        id: {type: integer, format: int64}
+        label: {type: string}
+        seats: {type: integer}
+        active: {type: boolean}
+        open_order_id: {type: integer, format: int64, nullable: true}
+    OrderSummary:
+      type: object
+      properties:
+        id: {type: integer, format: int64}
+        order_no: {type: integer, format: int64}
+        order_type: {type: string, enum: [dine_in, takeaway]}
+        table_id: {type: integer, format: int64, nullable: true}
+        table_label: {type: string}
+        status: {type: string, enum: [open, sent, finalised, cancelled]}
+        opened_by: {type: integer, format: int64}
+        opened_by_name: {type: string}
+        note: {type: string}
+        version: {type: integer}
+        cancel_reason: {type: string}
+        subtotal_cents: {type: integer, format: int64, description: 'active lines only, before tax'}
+        item_count: {type: integer}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    Order:
+      allOf:
+      - $ref: '#/components/schemas/OrderSummary'
+      - type: object
+        properties:
+          items:
+            type: array
+            items:
+              type: object
+              properties:
+                id: {type: integer, format: int64}
+                product_id: {type: integer, format: int64}
+                name: {type: string}
+                kitchen_routed: {type: boolean}
+                qty: {type: integer}
+                unit_price_cents: {type: integer, format: int64}
+                line_total_cents: {type: integer, format: int64}
+                status: {type: string, enum: [active, cancelled]}
+                note: {type: string}
+                cancel_reason: {type: string}
+                modifiers: {type: array, items: {type: object, properties: {id: {type: integer, format: int64}, name: {type: string}, price_delta_cents: {type: integer, format: int64}}}}
     Category:
       type: object
       properties:

@@ -213,3 +213,12 @@ Stage 1 (architecture pack, docs only): no input needed from you.
 - **Also fixed here:** the 9b notes said 10 sample products; the seed adds 11.
 - **Not covered:** no browser or screen-reader pass yet, and the repo has no frontend test runner.
 - **Next:** Stage 10 (tables, orders, kitchen tickets).
+
+## Stage 10a (backend): dining tables and orders
+- **Built:** migration `0009_tables_orders.sql` (dining_tables, orders, order_items, order_item_modifiers); `internal/orders` (service, handler); routes for tables (list, add, change) and orders (list, open, get, add item, change item, cancel item, cancel order). `seed-dev` adds six fake tables. `openapi.yaml` updated; `routes.csv` unchanged.
+- **Rules held by the database and tested:** a dine-in order has a table and a takeaway order has none; a cancelled or finalised order accepts no change, no new items, and is never deleted; an item's order, product and price never change; the server copies the price from the catalogue when a line is added.
+- **Order numbers:** from the gapless `order` counter inside the same transaction (A-05). Tested with 10 simultaneous orders: numbers 3 to 12, no gaps, no repeats.
+- **Concurrency:** every change locks the order row first; the optional `expected_version` returns 409 `order_changed` when someone else edited first.
+- **Assumption S-43 (owner to confirm):** Waiter, Bartender and custom roles see and change only their own orders; Super Admin, Business Manager, Cashier and Accountant / Auditor see all. Another person's order answers 404.
+- **Not in 10a (arrives in 10b):** send-to-kitchen, kitchen tickets and their numbers, the `Idempotency-Key` handling (`POST /orders` ignores the header for now), cancelling an order that was already sent (409 `order_sent`), and cancel tickets for sent lines. The route-denial test skips those routes until then.
+- **You must run a migration:** `docker compose run --rm backend /app/migrate up` (0009).
