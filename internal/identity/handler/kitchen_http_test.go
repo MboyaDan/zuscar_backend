@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -109,8 +110,17 @@ func (k *kitchenEnv) add(order, product int64, qty int, note string, mods ...int
 	return o.Items[len(o.Items)-1].ID
 }
 
+var keySeq atomic.Int64
+
+// newKey returns a fresh Idempotency-Key: one per user intent, as the API expects.
+func newKey() string { return "test-key-" + itoa(keySeq.Add(1)) }
+
 func (k *kitchenEnv) send(order int64) *httptest.ResponseRecorder {
-	return k.e.do(req{method: "POST", path: "/api/v1/orders/" + itoa(order) + "/send-to-kitchen", jar: k.wait})
+	return k.sendWithKey(order, newKey())
+}
+
+func (k *kitchenEnv) sendWithKey(order int64, key string) *httptest.ResponseRecorder {
+	return k.e.do(req{method: "POST", path: "/api/v1/orders/" + itoa(order) + "/send-to-kitchen", jar: k.wait, header: map[string]string{"Idempotency-Key": key}})
 }
 
 func (k *kitchenEnv) mustSend(order int64) kTicket {
@@ -225,8 +235,8 @@ func TestAC04_TicketPersistedBeforePrint(t *testing.T) {
 	if k.order(barOnly).Status != "open" {
 		t.Fatal("a refused send must leave the order open")
 	}
-	expect(t, k.e.do(req{method: "POST", path: "/api/v1/orders/99999/send-to-kitchen", jar: k.wait}), 404, "not_found")
-	expect(t, k.e.do(req{method: "POST", path: "/api/v1/orders/" + itoa(order) + "/send-to-kitchen", jar: k.cook}), 403, "forbidden")
+	expect(t, k.e.do(req{method: "POST", path: "/api/v1/orders/99999/send-to-kitchen", jar: k.wait, header: map[string]string{"Idempotency-Key": newKey()}}), 404, "not_found")
+	expect(t, k.e.do(req{method: "POST", path: "/api/v1/orders/" + itoa(order) + "/send-to-kitchen", jar: k.cook, header: map[string]string{"Idempotency-Key": newKey()}}), 403, "forbidden")
 
 	// Two taps at the same moment: one ticket.
 	dup := k.open()

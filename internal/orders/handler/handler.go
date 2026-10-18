@@ -14,6 +14,7 @@ import (
 	"zuscar/backend/internal/orders/service"
 	"zuscar/backend/internal/platform/auth"
 	zhttp "zuscar/backend/internal/platform/http"
+	"zuscar/backend/internal/platform/idempotency"
 )
 
 type Handler struct {
@@ -36,12 +37,12 @@ func (h *Handler) Register(v1 *gin.RouterGroup, guard ...gin.HandlerFunc) {
 
 	o := v1.Group("/orders", guard...)
 	o.GET("", orders, h.listOrders)
-	o.POST("", orders, h.createOrder)
+	o.POST("", orders, idempotency.Optional(), h.createOrder)
 	o.GET("/:id", orders, h.getOrder)
 	o.POST("/:id/items", orders, h.addItem)
 	o.PATCH("/:id/items/:itemId", orders, h.updateItem)
 	o.POST("/:id/items/:itemId/cancel", orders, h.cancelItem)
-	o.POST("/:id/send-to-kitchen", orders, h.sendToKitchen)
+	o.POST("/:id/send-to-kitchen", orders, idempotency.Required(), h.sendToKitchen)
 	o.POST("/:id/cancel", orders, h.cancelOrder)
 
 	k := v1.Group("/kitchen", guard...)
@@ -191,13 +192,30 @@ func (h *Handler) createOrder(c *gin.Context) {
 	if !decode(c, &in) {
 		return
 	}
-	out, err := h.svc.CreateOrder(c.Request.Context(), auth.From(c), in.OrderType, in.TableID, in.Note, meta(c))
+	out, replayed, err := h.svc.CreateOrder(c.Request.Context(), auth.From(c), in.OrderType, in.TableID, in.Note, idempotency.From(c), meta(c))
 	if err != nil {
 		h.fail(c, err)
 		return
 	}
+	if replayed != nil {
+		var r struct {
+			Order struct {
+				ID int64 `json:"id"`
+			} `json:"order"`
+		}
+		_ = json.Unmarshal(replayed.Body, &r)
+		c.Header("Location", "/api/v1/orders/"+strconv.FormatInt(r.Order.ID, 10))
+		replay(c, replayed)
+		return
+	}
 	c.Header("Location", "/api/v1/orders/"+strconv.FormatInt(out.ID, 10))
 	c.JSON(http.StatusCreated, gin.H{"order": out})
+}
+
+// replay answers with the response stored by the first request that used this Idempotency-Key.
+func replay(c *gin.Context, st *idempotency.Stored) {
+	c.Header(idempotency.ReplayHeader, "true")
+	c.Data(st.Status, "application/json; charset=utf-8", st.Body)
 }
 
 func (h *Handler) getOrder(c *gin.Context) {
@@ -332,9 +350,20 @@ func (h *Handler) sendToKitchen(c *gin.Context) {
 	if c.Request.ContentLength != 0 && !decode(c, &in) {
 		return
 	}
-	out, err := h.svc.SendToKitchen(c.Request.Context(), auth.From(c), id, in.ExpectedVersion, meta(c))
+	out, replayed, err := h.svc.SendToKitchen(c.Request.Context(), auth.From(c), id, in.ExpectedVersion, idempotency.From(c), meta(c))
 	if err != nil {
 		h.fail(c, err)
+		return
+	}
+	if replayed != nil {
+		var r struct {
+			Ticket struct {
+				ID int64 `json:"id"`
+			} `json:"ticket"`
+		}
+		_ = json.Unmarshal(replayed.Body, &r)
+		c.Header("Location", "/api/v1/kitchen/tickets/"+strconv.FormatInt(r.Ticket.ID, 10))
+		replay(c, replayed)
 		return
 	}
 	c.Header("Location", "/api/v1/kitchen/tickets/"+strconv.FormatInt(out.Ticket.ID, 10))
@@ -415,6 +444,11 @@ func (h *Handler) fail(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrForbidden):
 		zhttp.WriteError(c, http.StatusForbidden, "forbidden", "You do not have permission to do this.")
+	case errors.Is(err, idempotency.ErrKeyReused):
+		zhttp.WriteError(c, http.StatusUnprocessableEntity, "idempotency_key_reused", "This Idempotency-Key was already used for a different request. Use a new key for a new action.")
+	case errors.Is(err, idempotency.ErrInFlight):
+		c.Header("Retry-After", "1")
+		zhttp.WriteError(c, http.StatusConflict, "idempotency_conflict", "A request with this Idempotency-Key is still being processed. Try again in a moment.")
 	case errors.As(err, &nf):
 		zhttp.WriteError(c, http.StatusNotFound, "not_found", "That "+nf.What+" does not exist.")
 	case errors.As(err, &cf):

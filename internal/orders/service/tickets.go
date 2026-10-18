@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 
 	"zuscar/backend/internal/orders/repository"
 	"zuscar/backend/internal/platform/auth"
+	"zuscar/backend/internal/platform/idempotency"
 )
 
 // Kitchen tickets (Stage 10b-1, docs/behaviour.md sections 1 and 2). A ticket is written in the same transaction as
@@ -86,13 +88,26 @@ type SendResult struct {
 
 // SendToKitchen puts every active kitchen-routed line that has not gone yet on a new ticket. The first send makes
 // the original ticket and moves the order to sent; later sends make update tickets for lines added since. When
-// nothing is new it answers 409 nothing_to_send and consumes no ticket number, so a double tap cannot print twice.
-func (s *Service) SendToKitchen(ctx context.Context, actor *auth.Principal, orderID int64, expected *int32, m Meta) (SendResult, error) {
+// nothing is new it answers 409 nothing_to_send and consumes no ticket number. The Idempotency-Key is required on
+// this route: a retry with the same key returns the stored response, so a double click or a lost response can never
+// issue a second ticket number. The key is claimed first, so a replay still works if the order has changed since.
+func (s *Service) SendToKitchen(ctx context.Context, actor *auth.Principal, orderID int64, expected *int32, idem *idempotency.Key, m Meta) (SendResult, *idempotency.Stored, error) {
 	if err := s.need(actor, "orders.manage"); err != nil {
-		return SendResult{}, err
+		return SendResult{}, nil, err
 	}
 	var out SendResult
+	var replay *idempotency.Stored
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if idem != nil {
+			st, err := idempotency.Begin(ctx, tx, idem)
+			if err != nil {
+				return err
+			}
+			if st != nil {
+				replay = st
+				return nil
+			}
+		}
 		q := repository.New(tx)
 		if err := s.editable(ctx, q, actor, orderID, expected); err != nil {
 			return err
@@ -138,10 +153,19 @@ func (s *Service) SendToKitchen(ctx context.Context, actor *auth.Principal, orde
 		if out.Order, err = s.load(ctx, q, orderID); err != nil {
 			return err
 		}
-		out.Ticket, err = s.loadTicket(ctx, q, id, false)
-		return err
+		if out.Ticket, err = s.loadTicket(ctx, q, id, false); err != nil {
+			return err
+		}
+		if idem != nil {
+			b, err := json.Marshal(out)
+			if err != nil {
+				return err
+			}
+			return idempotency.Complete(ctx, tx, idem, 201, b)
+		}
+		return nil
 	})
-	return out, err
+	return out, replay, err
 }
 
 // ---- reading and moving tickets ----
