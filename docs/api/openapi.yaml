@@ -1344,7 +1344,7 @@ paths:
   /api/v1/orders/{id}/items/{itemId}:
     patch:
       summary: Change an item's quantity or note
-      description: 'Needs permission orders.manage. Order must be open or sent. A cancelled item cannot be changed (409 item_cancelled).'
+      description: 'Needs permission orders.manage. Order must be open or sent. A cancelled item cannot be changed (409 item_cancelled). Changing a line the kitchen already has raises a linked update ticket with a modify line.'
       security:
       - sessionCookie: []
       parameters:
@@ -1369,7 +1369,7 @@ paths:
   /api/v1/orders/{id}/items/{itemId}/cancel:
     post:
       summary: Cancel an item
-      description: 'Needs permission orders.manage. A reason is required and the cancellation is audited. Cancelling a line that was already sent will raise a kitchen ticket in Stage 10b.'
+      description: 'Needs permission orders.manage. A reason is required and the cancellation is audited. Cancelling a line the kitchen already has raises a linked update ticket with a cancel line (AC-04); a line that was never sent needs no ticket.'
       security:
       - sessionCookie: []
       parameters:
@@ -1394,7 +1394,7 @@ paths:
   /api/v1/orders/{id}/cancel:
     post:
       summary: Cancel an order
-      description: 'Needs permission orders.manage. A reason is required and the cancellation is audited. An order already sent to the kitchen returns 409 order_sent until Stage 10b adds kitchen cancel tickets.'
+      description: 'Needs permission orders.manage. A reason is required and the cancellation is audited. Cancelling a sent order raises a cancel update ticket for the lines the kitchen still holds and marks the tickets still to do as cancelled, all in one transaction.'
       security:
       - sessionCookie: []
       parameters:
@@ -1410,6 +1410,91 @@ paths:
           content:
             application/json:
               schema: {type: object, properties: {order: {$ref: '#/components/schemas/Order'}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/orders/{id}/send-to-kitchen:
+    post:
+      summary: Send new lines to the kitchen
+      description: 'Needs permission orders.manage. Puts every active kitchen-routed line that has not gone yet on a new ticket. The first send makes the original ticket and moves the order to sent; later sends make update tickets for lines added since. The ticket and its number are committed before the response (AC-04). 409 nothing_to_send when there is nothing new, and no ticket number is used. The Idempotency-Key header is added in Stage 10b-2.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {type: object, properties: {expected_version: {type: integer, description: 'the order version the screen showed; a different current version returns 409 order_changed'}}}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {type: object, properties: {order: {$ref: '#/components/schemas/Order'}, ticket: {$ref: '#/components/schemas/KitchenTicket'}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/kitchen/tickets:
+    get:
+      summary: List kitchen tickets
+      description: 'Needs permission kitchen.view. Oldest first. Without status, only tickets still to do (submitted, preparing, ready); status=all lists every status. Every holder of kitchen.view sees every ticket (S-44). Tickets show no prices.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: status, in: query, schema: {type: string, enum: [submitted, preparing, ready, served, cancelled, all]}}
+      - {name: order_id, in: query, schema: {type: integer, format: int64}}
+      - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 100}}
+      - {name: cursor, in: query, description: 'the next_cursor of the previous page', schema: {type: string}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/KitchenTicket'}}, next_cursor: {type: string}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+  /api/v1/kitchen/tickets/{id}:
+    get:
+      summary: Get one kitchen ticket
+      description: 'Needs permission kitchen.view. Includes the lines and the status history.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {ticket: {$ref: '#/components/schemas/KitchenTicket'}}}
+        '401': *id001
+        '403': *id001
+        '404': *id001
+  /api/v1/kitchen/tickets/{id}/status:
+    post:
+      summary: Move a kitchen ticket forward
+      description: 'Needs permission kitchen.update. Forward only: submitted, preparing, ready, served; skipping forward is allowed (S-17). cancelled cannot be set here, only by cancelling the order. A ticket that is served or cancelled cannot move (409 invalid_transition). Payment status is never consulted (AC-04). Each change is recorded in the status history and the audit log.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [status], properties: {status: {type: string, enum: [preparing, ready, served]}}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {ticket: {$ref: '#/components/schemas/KitchenTicket'}}}
         '400': *id001
         '401': *id001
         '403': *id001
@@ -1480,7 +1565,39 @@ components:
                 status: {type: string, enum: [active, cancelled]}
                 note: {type: string}
                 cancel_reason: {type: string}
+                sent_to_kitchen: {type: boolean, description: 'true once the line is on a kitchen ticket'}
                 modifiers: {type: array, items: {type: object, properties: {id: {type: integer, format: int64}, name: {type: string}, price_delta_cents: {type: integer, format: int64}}}}
+    KitchenTicket:
+      type: object
+      properties:
+        id: {type: integer, format: int64}
+        order_id: {type: integer, format: int64}
+        order_no: {type: integer, format: int64}
+        order_type: {type: string, enum: [dine_in, takeaway]}
+        table_label: {type: string}
+        business_date: {type: string, format: date, description: 'in the venue time zone; ticket numbers restart each business date'}
+        ticket_no: {type: integer, format: int64}
+        kind: {type: string, enum: [original, update]}
+        parent_ticket_id: {type: integer, format: int64, nullable: true, description: 'the original ticket, set only on an update ticket'}
+        status: {type: string, enum: [submitted, preparing, ready, served, cancelled]}
+        created_by_name: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              order_item_id: {type: integer, format: int64}
+              name: {type: string}
+              qty: {type: integer}
+              change_type: {type: string, enum: [add, cancel, modify]}
+              modifiers: {type: string}
+              note: {type: string}
+        history:
+          type: array
+          description: 'only on the single-ticket read'
+          items: {type: object, properties: {from_status: {type: string}, to_status: {type: string}, changed_by: {type: string}, at: {type: string, format: date-time}}}
     Category:
       type: object
       properties:

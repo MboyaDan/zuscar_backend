@@ -79,7 +79,8 @@ INSERT INTO order_item_modifiers (order_item_id, modifier_id, price_delta_cents)
 
 -- name: ListOrderItems :many
 SELECT i.id, i.order_id, i.product_id, p.name AS product_name, p.kitchen_routed, i.qty, i.unit_price_cents, i.status, i.note,
-       COALESCE(i.cancel_reason, '')::text AS cancel_reason, i.created_at
+       COALESCE(i.cancel_reason, '')::text AS cancel_reason, i.created_at,
+       EXISTS (SELECT 1 FROM kitchen_ticket_items k WHERE k.order_item_id = i.id AND k.change_type = 'add') AS sent_to_kitchen
 FROM order_items i JOIN products p ON p.id = i.product_id
 WHERE i.order_id = $1 ORDER BY i.id;
 

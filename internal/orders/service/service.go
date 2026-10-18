@@ -226,6 +226,7 @@ type ItemView struct {
 	Status         string         `json:"status"`
 	Note           string         `json:"note"`
 	CancelReason   string         `json:"cancel_reason,omitempty"`
+	SentToKitchen  bool           `json:"sent_to_kitchen"`
 	Modifiers      []ModifierLine `json:"modifiers"`
 }
 
@@ -300,7 +301,7 @@ func (s *Service) load(ctx context.Context, q *repository.Queries, id int64) (Or
 		}
 		items = append(items, ItemView{ID: r.ID, ProductID: r.ProductID, Name: r.ProductName, KitchenRouted: r.KitchenRouted, Qty: r.Qty,
 			UnitPriceCents: r.UnitPriceCents, LineTotalCents: (r.UnitPriceCents + delta[r.ID]) * int64(r.Qty), Status: r.Status, Note: r.Note,
-			CancelReason: r.CancelReason, Modifiers: ml})
+			CancelReason: r.CancelReason, SentToKitchen: r.SentToKitchen, Modifiers: ml})
 	}
 	return OrderView{OrderSummary: summary(head), Items: items}, nil
 }
@@ -576,6 +577,16 @@ func (s *Service) UpdateItem(ctx context.Context, actor *auth.Principal, orderID
 			if err := q.BumpOrder(ctx, orderID); err != nil {
 				return err
 			}
+			// A line the kitchen already has is changed with an update ticket, not by editing the old one (AC-04).
+			st, gerr := q.GetItemForTicket(ctx, repository.GetItemForTicketParams{ID: itemID, OrderID: orderID})
+			if gerr != nil {
+				return gerr
+			}
+			if st.Sent {
+				if err := s.raiseUpdateTicket(ctx, tx, q, actor, m, orderID, []ticketLine{{OrderItemID: itemID, Name: st.Name, Qty: qty, ChangeType: "modify", Modifiers: st.ModifiersText, Note: note}}); err != nil {
+					return err
+				}
+			}
 		}
 		out, err = s.load(ctx, q, orderID)
 		return err
@@ -591,8 +602,8 @@ func checkReason(reason string) (string, error) {
 	return reason, nil
 }
 
-// CancelItem cancels one line with a reason. While the order is still open nothing has gone to the kitchen, so
-// no ticket is involved; cancelling a line that was already sent will raise a cancel ticket in Stage 10b.
+// CancelItem cancels one line with a reason. A line that was never sent needs no ticket; a line the kitchen already
+// has is cancelled with a linked update ticket.
 func (s *Service) CancelItem(ctx context.Context, actor *auth.Principal, orderID, itemID int64, reason string, expected *int32, m Meta) (OrderView, error) {
 	if err := s.need(actor, "orders.manage"); err != nil {
 		return OrderView{}, err
@@ -617,11 +628,21 @@ func (s *Service) CancelItem(ctx context.Context, actor *auth.Principal, orderID
 		if cur.Status != "active" {
 			return &ConflictError{Code: "item_cancelled", Msg: "This item was already cancelled."}
 		}
+		st, err := q.GetItemForTicket(ctx, repository.GetItemForTicketParams{ID: itemID, OrderID: orderID})
+		if err != nil {
+			return err
+		}
 		if err := q.CancelOrderItem(ctx, repository.CancelOrderItemParams{ID: itemID, CancelReason: pgtype.Text{String: reason, Valid: true}, CancelledBy: pgtype.Int8{Int64: actor.UserID, Valid: true}}); err != nil {
 			return err
 		}
 		if err := q.BumpOrder(ctx, orderID); err != nil {
 			return err
+		}
+		// A line the kitchen already has is cancelled with an update ticket so the kitchen is told (AC-04).
+		if st.Sent {
+			if err := s.raiseUpdateTicket(ctx, tx, q, actor, m, orderID, []ticketLine{{OrderItemID: itemID, Name: st.Name, Qty: cur.Qty, ChangeType: "cancel", Modifiers: st.ModifiersText, Note: cur.Note}}); err != nil {
+				return err
+			}
 		}
 		if err := s.record(ctx, tx, actor, m, "order.item_cancelled", "order", orderID, map[string]any{"item_id": itemID, "qty": cur.Qty}, map[string]any{"item_id": itemID, "reason": reason}); err != nil {
 			return err
@@ -632,8 +653,8 @@ func (s *Service) CancelItem(ctx context.Context, actor *auth.Principal, orderID
 	return out, err
 }
 
-// CancelOrder cancels an order that has not been sent. A sent order needs a cancel ticket for the kitchen, which
-// arrives in Stage 10b, so it is refused here rather than cancelled without telling the kitchen.
+// CancelOrder cancels an open or sent order. A sent order raises a cancel update ticket for the lines the kitchen
+// still holds, and the tickets that were still to do are marked cancelled, all in the same transaction.
 func (s *Service) CancelOrder(ctx context.Context, actor *auth.Principal, id int64, reason string, expected *int32, m Meta) (OrderView, error) {
 	if err := s.need(actor, "orders.manage"); err != nil {
 		return OrderView{}, err
@@ -653,7 +674,24 @@ func (s *Service) CancelOrder(ctx context.Context, actor *auth.Principal, id int
 			return err
 		}
 		if cur.Status == "sent" {
-			return &ConflictError{Code: "order_sent", Msg: "This order was already sent to the kitchen. Cancelling it needs a kitchen cancel ticket, which is not available yet."}
+			// Close the tickets still to do first, then tell the kitchen to drop what it still holds with a new cancel
+			// ticket. The order matters: the new ticket must stay submitted so the kitchen sees it.
+			live, err := q.ListLiveSentItems(ctx, id)
+			if err != nil {
+				return err
+			}
+			if err := s.cancelOpenTickets(ctx, tx, q, actor, m, id); err != nil {
+				return err
+			}
+			if len(live) > 0 {
+				lines := make([]ticketLine, 0, len(live))
+				for _, it := range live {
+					lines = append(lines, ticketLine{OrderItemID: it.ID, Name: it.Name, Qty: it.Qty, ChangeType: "cancel", Modifiers: it.ModifiersText, Note: it.Note})
+				}
+				if err := s.raiseUpdateTicket(ctx, tx, q, actor, m, id, lines); err != nil {
+					return err
+				}
+			}
 		}
 		if err := q.CancelOrder(ctx, repository.CancelOrderParams{ID: id, CancelReason: pgtype.Text{String: reason, Valid: true}, CancelledBy: pgtype.Int8{Int64: actor.UserID, Valid: true}}); err != nil {
 			return err
