@@ -346,7 +346,8 @@ func (q *Queries) ListOrderItemModifiers(ctx context.Context, dollar_1 []int64) 
 
 const listOrderItems = `-- name: ListOrderItems :many
 SELECT i.id, i.order_id, i.product_id, p.name AS product_name, p.kitchen_routed, i.qty, i.unit_price_cents, i.status, i.note,
-       COALESCE(i.cancel_reason, '')::text AS cancel_reason, i.created_at
+       COALESCE(i.cancel_reason, '')::text AS cancel_reason, i.created_at,
+       EXISTS (SELECT 1 FROM kitchen_ticket_items k WHERE k.order_item_id = i.id AND k.change_type = 'add') AS sent_to_kitchen
 FROM order_items i JOIN products p ON p.id = i.product_id
 WHERE i.order_id = $1 ORDER BY i.id
 `
@@ -363,6 +364,7 @@ type ListOrderItemsRow struct {
 	Note           string
 	CancelReason   string
 	CreatedAt      pgtype.Timestamptz
+	SentToKitchen  bool
 }
 
 func (q *Queries) ListOrderItems(ctx context.Context, orderID int64) ([]ListOrderItemsRow, error) {
@@ -386,6 +388,7 @@ func (q *Queries) ListOrderItems(ctx context.Context, orderID int64) ([]ListOrde
 			&i.Note,
 			&i.CancelReason,
 			&i.CreatedAt,
+			&i.SentToKitchen,
 		); err != nil {
 			return nil, err
 		}

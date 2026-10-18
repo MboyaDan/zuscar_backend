@@ -5,7 +5,7 @@ Updated at Stage 7a. S-34 was approved by the owner; S-35 to S-37 are defaults i
 ## Explicitly tracked by the owner
 | ID | Item | Default in use | Status |
 |---|---|---|---|
-| S-17 | Kitchen ticket statuses may skip forward (for example submitted straight to served) because the default kitchen has no screen | Skipping allowed | **OPEN**, to be confirmed by the owner before Stage 10 |
+| S-17 | Kitchen ticket statuses may skip forward (for example submitted straight to served) because the default kitchen has no screen | Skipping allowed | Confirmed by the owner on 2026-10-17 ("use defaults"); built in Stage 10b-1 |
 | S-18 | A sale can be voided only from finalised with no refunds; later corrections are refunds | Void only before any refund | **OPEN**, owner and accountant to confirm before Stage 15 |
 | S-21 | A shift can be closed while non-cash payments (for example manual M-Pesa) are still pending; they are listed separately on the cash-up | Close allowed | **OPEN**, owner and accountant to confirm before Stage 12 |
 | S-15 | Extra permission keys beyond the brief: sales.reprint, orders.manage, kitchen.view, kitchen.update, catalogue.manage, shifts.manage, inventory.wastage, inventory.override_negative, rooms.view, folios.view, folios.post, audit.view | **Retained as seeded** | Retained at the owner's instruction. Conflict check (Stage 6): no conflict found. Every key is in the catalog, matches `docs/rbac.md` (`TestCatalogMatchesRBACDocument`), and is used by the planned routes (`TestRoutePermissionsExistInCatalog`); the owner decision that Business Manager lacks `roles.manage` and `permissions.assign` is enforced (`TestProtectedRulesInTemplates`). Re-check if the brief changes. |

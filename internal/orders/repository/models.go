@@ -51,6 +51,30 @@ type DocumentCounter struct {
 	UpdatedAt pgtype.Timestamptz
 }
 
+type KitchenTicket struct {
+	ID             int64
+	OrderID        int64
+	BusinessDate   pgtype.Date
+	TicketNo       int64
+	Kind           string
+	ParentTicketID pgtype.Int8
+	Status         string
+	CreatedBy      int64
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
+}
+
+type KitchenTicketItem struct {
+	ID            int64
+	TicketID      int64
+	OrderItemID   int64
+	NameSnapshot  string
+	Qty           int32
+	ChangeType    string
+	ModifiersText string
+	Note          string
+}
+
 type LoginAttempt struct {
 	ID           int64
 	UsernameNorm string
@@ -182,6 +206,15 @@ type TaxRate struct {
 	Active    bool
 	CreatedAt pgtype.Timestamptz
 	Treatment string
+}
+
+type TicketStatusHistory struct {
+	ID         int64
+	TicketID   int64
+	FromStatus pgtype.Text
+	ToStatus   string
+	ChangedBy  int64
+	ChangedAt  pgtype.Timestamptz
 }
 
 type User struct {

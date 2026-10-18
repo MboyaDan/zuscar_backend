@@ -1,4 +1,4 @@
-// Package handler exposes the orders module over HTTP (docs/api/routes.csv, Stage 10a).
+// Package handler exposes the orders module over HTTP (docs/api/routes.csv, Stages 10a and 10b).
 package handler
 
 import (
@@ -41,7 +41,13 @@ func (h *Handler) Register(v1 *gin.RouterGroup, guard ...gin.HandlerFunc) {
 	o.POST("/:id/items", orders, h.addItem)
 	o.PATCH("/:id/items/:itemId", orders, h.updateItem)
 	o.POST("/:id/items/:itemId/cancel", orders, h.cancelItem)
+	o.POST("/:id/send-to-kitchen", orders, h.sendToKitchen)
 	o.POST("/:id/cancel", orders, h.cancelOrder)
+
+	k := v1.Group("/kitchen", guard...)
+	k.GET("/tickets", requirePermission("kitchen.view"), h.listTickets)
+	k.GET("/tickets/:id", requirePermission("kitchen.view"), h.getTicket)
+	k.POST("/tickets/:id/status", requirePermission("kitchen.update"), h.setTicketStatus)
 }
 
 func requirePermission(permission string) gin.HandlerFunc {
@@ -311,6 +317,95 @@ func (h *Handler) cancelOrder(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"order": out})
+}
+
+// ---- send to kitchen and kitchen tickets ----
+
+func (h *Handler) sendToKitchen(c *gin.Context) {
+	id, ok := idParam(c, "id", "order")
+	if !ok {
+		return
+	}
+	var in struct {
+		ExpectedVersion *int32 `json:"expected_version"`
+	}
+	if c.Request.ContentLength != 0 && !decode(c, &in) {
+		return
+	}
+	out, err := h.svc.SendToKitchen(c.Request.Context(), auth.From(c), id, in.ExpectedVersion, meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.Header("Location", "/api/v1/kitchen/tickets/"+strconv.FormatInt(out.Ticket.ID, 10))
+	c.JSON(http.StatusCreated, out)
+}
+
+func (h *Handler) listTickets(c *gin.Context) {
+	f := service.TicketFilter{Status: c.Query("status")}
+	for _, q := range []struct {
+		name string
+		dst  **int64
+	}{{"order_id", &f.OrderID}, {"cursor", &f.After}} {
+		if v := c.Query(q.name); v != "" {
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || n <= 0 {
+				zhttp.WriteError(c, http.StatusBadRequest, "validation_failed", "Some fields are invalid.", zhttp.FieldError{Field: q.name, Message: "must be a number"})
+				return
+			}
+			*q.dst = &n
+		}
+	}
+	if v := c.Query("limit"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 32)
+		if err != nil || n < 1 {
+			zhttp.WriteError(c, http.StatusBadRequest, "validation_failed", "Some fields are invalid.", zhttp.FieldError{Field: "limit", Message: "must be a number"})
+			return
+		}
+		f.Limit = int32(n)
+	}
+	out, next, err := h.svc.ListTickets(c.Request.Context(), auth.From(c), f)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": out, "next_cursor": next})
+}
+
+func (h *Handler) getTicket(c *gin.Context) {
+	id, ok := idParam(c, "id", "kitchen ticket")
+	if !ok {
+		return
+	}
+	out, err := h.svc.GetTicket(c.Request.Context(), auth.From(c), id)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ticket": out})
+}
+
+func (h *Handler) setTicketStatus(c *gin.Context) {
+	id, ok := idParam(c, "id", "kitchen ticket")
+	if !ok {
+		return
+	}
+	var in struct {
+		Status string `json:"status"`
+	}
+	if !decode(c, &in) {
+		return
+	}
+	if in.Status == "" {
+		required(c, "status")
+		return
+	}
+	out, err := h.svc.SetTicketStatus(c.Request.Context(), auth.From(c), id, in.Status, meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ticket": out})
 }
 
 func (h *Handler) fail(c *gin.Context, err error) {
