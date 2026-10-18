@@ -1283,9 +1283,11 @@ paths:
         '403': *id001
     post:
       summary: Open an order
-      description: 'Needs permission orders.manage. A dine-in order needs an active table; a takeaway order has none. The order number comes from a gapless counter. The Idempotency-Key header is honoured from Stage 10b.'
+      description: 'Needs permission orders.manage. A dine-in order needs an active table; a takeaway order has none. The order number comes from a gapless counter. The Idempotency-Key header is optional here: Idempotency-Key: the same key with the same request returns the stored response (header Idempotent-Replayed: true) and does the work once; the same key with a different request or user is 422 idempotency_key_reused; a request still being processed answers 409 idempotency_conflict after a short wait. Only successful responses are stored, so a failed request leaves its key free for a corrected retry. Keys are kept for the idempotency_ttl_hours setting, never less than 24 hours (S-06). The stored response has the same content, with JSON keys possibly in a different order.'
       security:
       - sessionCookie: []
+      parameters:
+      - {name: Idempotency-Key, in: header, required: false, schema: {type: string, minLength: 8, maxLength: 128, pattern: '^[A-Za-z0-9_.:-]+$'}}
       requestBody:
         required: true
         content:
@@ -1300,6 +1302,8 @@ paths:
         '400': *id001
         '401': *id001
         '403': *id001
+        '409': *id001
+        '422': *id001
   /api/v1/orders/{id}:
     get:
       summary: Get an order with its items
@@ -1418,11 +1422,12 @@ paths:
   /api/v1/orders/{id}/send-to-kitchen:
     post:
       summary: Send new lines to the kitchen
-      description: 'Needs permission orders.manage. Puts every active kitchen-routed line that has not gone yet on a new ticket. The first send makes the original ticket and moves the order to sent; later sends make update tickets for lines added since. The ticket and its number are committed before the response (AC-04). 409 nothing_to_send when there is nothing new, and no ticket number is used. The Idempotency-Key header is added in Stage 10b-2.'
+      description: 'Needs permission orders.manage. Puts every active kitchen-routed line that has not gone yet on a new ticket. The first send makes the original ticket and moves the order to sent; later sends make update tickets for lines added since. The ticket and its number are committed before the response (AC-04). 409 nothing_to_send when there is nothing new, and no ticket number is used. The Idempotency-Key header is required (400 without it), because a double click must not issue two ticket numbers. Idempotency-Key: the same key with the same request returns the stored response (header Idempotent-Replayed: true) and does the work once; the same key with a different request or user is 422 idempotency_key_reused; a request still being processed answers 409 idempotency_conflict after a short wait. Only successful responses are stored, so a failed request leaves its key free for a corrected retry. Keys are kept for the idempotency_ttl_hours setting, never less than 24 hours (S-06). The stored response has the same content, with JSON keys possibly in a different order.'
       security:
       - sessionCookie: []
       parameters:
       - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 128, pattern: '^[A-Za-z0-9_.:-]+$'}}
       requestBody:
         required: false
         content:
@@ -1439,6 +1444,7 @@ paths:
         '403': *id001
         '404': *id001
         '409': *id001
+        '422': *id001
   /api/v1/kitchen/tickets:
     get:
       summary: List kitchen tickets

@@ -6,6 +6,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/netip"
 	"sort"
@@ -21,6 +22,7 @@ import (
 	"zuscar/backend/internal/orders/repository"
 	"zuscar/backend/internal/platform/audit"
 	"zuscar/backend/internal/platform/auth"
+	"zuscar/backend/internal/platform/idempotency"
 )
 
 var ErrForbidden = errors.New("you do not have permission to do this")
@@ -309,26 +311,38 @@ func (s *Service) load(ctx context.Context, q *repository.Queries, id int64) (Or
 // ---- orders ----
 
 // CreateOrder opens an order. A dine-in order needs an active table; a takeaway order has none. The order number
-// comes from the gapless counter inside the same transaction.
-func (s *Service) CreateOrder(ctx context.Context, actor *auth.Principal, orderType string, tableID *int64, note string, m Meta) (OrderView, error) {
+// comes from the gapless counter inside the same transaction. With an idempotency key (optional on this route) a
+// retry returns the order that was already opened and uses no further order number.
+func (s *Service) CreateOrder(ctx context.Context, actor *auth.Principal, orderType string, tableID *int64, note string, idem *idempotency.Key, m Meta) (OrderView, *idempotency.Stored, error) {
 	if err := s.need(actor, "orders.manage"); err != nil {
-		return OrderView{}, err
+		return OrderView{}, nil, err
 	}
 	if orderType != "dine_in" && orderType != "takeaway" {
-		return OrderView{}, &ValidationError{Field: "order_type", Msg: "must be dine_in or takeaway"}
+		return OrderView{}, nil, &ValidationError{Field: "order_type", Msg: "must be dine_in or takeaway"}
 	}
 	note = strings.TrimSpace(note)
 	if len([]rune(note)) > 200 {
-		return OrderView{}, &ValidationError{Field: "note", Msg: "must be 200 characters or fewer"}
+		return OrderView{}, nil, &ValidationError{Field: "note", Msg: "must be 200 characters or fewer"}
 	}
 	if orderType == "dine_in" && tableID == nil {
-		return OrderView{}, &ValidationError{Field: "table_id", Msg: "is required for a dine-in order"}
+		return OrderView{}, nil, &ValidationError{Field: "table_id", Msg: "is required for a dine-in order"}
 	}
 	if orderType == "takeaway" && tableID != nil {
-		return OrderView{}, &ValidationError{Field: "table_id", Msg: "must be empty for a takeaway order"}
+		return OrderView{}, nil, &ValidationError{Field: "table_id", Msg: "must be empty for a takeaway order"}
 	}
 	var out OrderView
+	var replay *idempotency.Stored
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if idem != nil {
+			st, err := idempotency.Begin(ctx, tx, idem)
+			if err != nil {
+				return err
+			}
+			if st != nil {
+				replay = st
+				return nil
+			}
+		}
 		q := repository.New(tx)
 		tid := pgtype.Int8{}
 		if tableID != nil {
@@ -352,10 +366,21 @@ func (s *Service) CreateOrder(ctx context.Context, actor *auth.Principal, orderT
 		if err := s.record(ctx, tx, actor, m, "order.created", "order", id, nil, map[string]any{"order_no": no, "order_type": orderType, "table_id": tableID}); err != nil {
 			return err
 		}
-		out, err = s.load(ctx, q, id)
-		return err
+		if out, err = s.load(ctx, q, id); err != nil {
+			return err
+		}
+		if idem != nil {
+			b, err := json.Marshal(struct {
+				Order OrderView `json:"order"`
+			}{out})
+			if err != nil {
+				return err
+			}
+			return idempotency.Complete(ctx, tx, idem, 201, b)
+		}
+		return nil
 	})
-	return out, err
+	return out, replay, err
 }
 
 type OrderFilter struct {
