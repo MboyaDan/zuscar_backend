@@ -53,6 +53,7 @@ type Meta struct {
 type Orders interface {
 	OrderForSale(ctx context.Context, tx pgx.Tx, actor *auth.Principal, orderID int64, lock bool, expected *int32) (orderservice.OrderForSale, error)
 	MarkFinalised(ctx context.Context, tx pgx.Tx, orderID int64) error
+	ProductsForSale(ctx context.Context, tx pgx.Tx, ids []int64) (map[int64]orderservice.ProductForSale, error)
 }
 
 // Counters hands out gapless document numbers inside the caller's transaction (settings owns the counters).
@@ -143,32 +144,33 @@ type PaymentView struct {
 }
 
 type SaleView struct {
-	ID            int64          `json:"id"`
-	ReceiptNo     int64          `json:"receipt_no"`
-	OrderID       *int64         `json:"order_id"`
-	OrderNo       int64          `json:"order_no,omitempty"`
-	BusinessDate  string         `json:"business_date"`
-	SubtotalCents int64          `json:"subtotal_cents"`
-	DiscountCents int64          `json:"discount_cents"`
-	TaxCents      int64          `json:"tax_cents"`
-	TotalCents    int64          `json:"total_cents"`
-	PaidCents     int64          `json:"paid_cents"`    // confirmed payments only (AC-20)
-	PendingCents  int64          `json:"pending_cents"` // recorded but not yet confirmed
-	BalanceCents  int64          `json:"balance_cents"` // total minus confirmed payments
-	Status        string         `json:"status"`
-	PaymentStatus string         `json:"payment_status"`
-	Source        string         `json:"source"`
-	CashierID     int64          `json:"cashier_id"`
-	CashierName   string         `json:"cashier_name"`
-	ShiftID       *int64         `json:"shift_id"`
-	WaiterID      *int64         `json:"waiter_id"`
-	TaxStatus     string         `json:"tax_status"`
-	CreatedAt     time.Time      `json:"created_at"`
-	Items         []SaleItemView `json:"items"`
-	Payments      []PaymentView  `json:"payments"`
-	RefundedCents int64          `json:"refunded_cents"` // money handed back so far (refunds and voids)
-	Refunds       []RefundView   `json:"refunds"`
-	Voidable      bool           `json:"voidable"` // finalised, no refund yet, and still the day it was made (S-18); set when a sale is read on its own
+	ID            int64              `json:"id"`
+	ReceiptNo     int64              `json:"receipt_no"`
+	OrderID       *int64             `json:"order_id"`
+	OrderNo       int64              `json:"order_no,omitempty"`
+	BusinessDate  string             `json:"business_date"`
+	SubtotalCents int64              `json:"subtotal_cents"`
+	DiscountCents int64              `json:"discount_cents"`
+	TaxCents      int64              `json:"tax_cents"`
+	TotalCents    int64              `json:"total_cents"`
+	PaidCents     int64              `json:"paid_cents"`    // confirmed payments only (AC-20)
+	PendingCents  int64              `json:"pending_cents"` // recorded but not yet confirmed
+	BalanceCents  int64              `json:"balance_cents"` // total minus confirmed payments
+	Status        string             `json:"status"`
+	PaymentStatus string             `json:"payment_status"`
+	Source        string             `json:"source"`
+	CashierID     int64              `json:"cashier_id"`
+	CashierName   string             `json:"cashier_name"`
+	ShiftID       *int64             `json:"shift_id"`
+	WaiterID      *int64             `json:"waiter_id"`
+	TaxStatus     string             `json:"tax_status"`
+	CreatedAt     time.Time          `json:"created_at"`
+	Items         []SaleItemView     `json:"items"`
+	Payments      []PaymentView      `json:"payments"`
+	RefundedCents int64              `json:"refunded_cents"` // money handed back so far (refunds and voids)
+	Refunds       []RefundView       `json:"refunds"`
+	ManualReceipt *ManualReceiptInfo `json:"manual_receipt"` // the paper receipt behind an outage entry (Stage 16); null for a normal sale
+	Voidable      bool               `json:"voidable"`       // finalised, no refund yet, and still the day it was made (S-18); set when a sale is read on its own
 }
 
 func (s *Service) load(ctx context.Context, q *repository.Queries, id int64) (SaleView, error) {
@@ -218,6 +220,14 @@ func (s *Service) load(ctx context.Context, q *repository.Queries, id int64) (Sa
 		v.WaiterID = &w
 	}
 	v.ShiftID = optID(h.ShiftID)
+	if h.Source == "outage_reconciliation" {
+		mr, err := q.GetManualReceiptForSale(ctx, id)
+		if err != nil {
+			return SaleView{}, err
+		}
+		v.ManualReceipt = &ManualReceiptInfo{ManualReceiptNo: mr.ManualReceiptNo, OccurredAt: mr.OriginalOccurredAt.Time, PaperTotalCents: mr.PaperTotalCents,
+			DiscrepancyNote: mr.DiscrepancyNote, SourceNote: mr.SourceNote, EnteredBy: mr.EnteredBy, EnteredByName: mr.EnteredByName}
+	}
 	for _, i := range items {
 		v.Items = append(v.Items, SaleItemView{ID: i.ID, ProductID: i.ProductID, Name: i.NameSnapshot, Module: i.Module, Qty: i.Qty, UnitPriceCents: i.UnitPriceCents,
 			ModifiersText: i.ModifiersText, ModifiersCents: i.ModifiersCents, DiscountCents: i.DiscountCents, DiscountReason: i.DiscountReason, TaxCode: i.TaxCode,

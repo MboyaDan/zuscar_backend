@@ -4,7 +4,7 @@ Go API for Zuscar, a hospitality POS and operations system for one Kenyan venue.
 
 Project documents (requirements brief, architecture, ADRs, schema, RBAC, API plan, progress, assumptions) live in `docs/` here. Start with `docs/PROGRESS.md`.
 
-**Status: Stage 6.** The API serves health checks and authentication (`/api/v1/auth/login`, `logout`, `me`, `change-password`, `reauth`, `pin-switch`). Users, roles, permissions, sessions and audit tables exist, with commands to migrate, bootstrap and seed. Login SCREENS arrive in Stage 8; you can already sign in with `curl` (see below). User and role administration endpoints arrive in Stage 7.
+**Status: Stage 16.** The API covers sign-in and roles, settings and tax, the catalogue (menu, prices, modifiers), tables and orders, kitchen tickets, sales with payments, cashier shifts, receipt and ticket printing, voids and refunds, and outage reconciliation (paper receipts entered after a system outage). Rooms, folios, stock, purchasing, reports and the payment-provider integrations come in later stages (`docs/PROGRESS.md` has the plan and what each stage did). The web screens live in the separate frontend repository.
 
 ## Run it locally (everything in Docker)
 
@@ -18,14 +18,14 @@ You need Docker Desktop (Docker Compose v2). You do **not** need Go installed.
 2. **Start PostgreSQL and the API:** `docker compose up --build -d`
 3. **Check it is alive:** open http://localhost:8080/healthz (shows `{"status":"ok"}`) and http://localhost:8080/readyz (shows `{"status":"ready"}` when the database is reachable). `docker compose ps` should show both containers healthy.
 4. **Create the database tables (an explicit step, never automatic):**
-   `docker compose run --rm backend /app/migrate up`
-   Re-running it is safe; `docker compose run --rm backend /app/migrate status` lists what is applied.
+   `docker compose run --rm --entrypoint /app/migrate backend up`
+   Re-running it is safe; `docker compose run --rm --entrypoint /app/migrate backend status` lists what is applied.
 5. **Load data.** Pick ONE:
    - **Fake development data** (9 obviously fake staff users, all named `dev.*`):
-     `docker compose run --rm backend /app/seed-dev`
+     `docker compose run --rm --entrypoint /app/seed-dev backend`
      Every seeded user has the documented dev-only password `DevOnly-Zuscar-2026`. It also adds a small FAKE menu (6 categories, 11 products with SKUs starting `DEV-`, 6 modifiers) when the database has no categories yet; running it again never duplicates or resets the menu. This command refuses to run when `APP_ENV=production` and refuses a database that holds real users.
    - **A clean, production-style start** (one real Super Admin, permission and role templates, business settings, tax rate, counters; nothing else):
-     `docker compose run --rm backend /app/bootstrap --username owner --display-name "Your Name" --business-name "Your Venue" --tax-rate-bp 1600`
+     `docker compose run --rm --entrypoint /app/bootstrap backend --username owner --display-name "Your Name" --business-name "Your Venue" --tax-rate-bp 1600`
      It asks for a password at a prompt (minimum 12 characters; typed twice, never stored in a file). `--tax-rate-bp` is in basis points and defaults to `1600` (16.00%). **That default is provisional, for development only**: before go-live the real tax configuration must be verified against your VAT registration and KRA requirements (`docs/tax-configuration.md`). Three tax categories are created (standard, zero-rated, exempt). This system does not integrate with eTIMS, so its receipts are not KRA tax invoices. Add `--receipt-start 5001` to continue your paper receipt book. The new user must change the password at first login.
 
    You cannot do both on the same database. To switch, wipe it: `docker compose down -v`, then repeat from step 2.
@@ -61,11 +61,11 @@ The API reads everything from environment variables (`internal/platform/config`)
 1. Push this repository to Git. In Render, create a **Web Service** from it with **Runtime: Docker**. The last stage of the `Dockerfile` is the production image, so no target needs to be chosen.
 2. Set the environment variables above. Set the health check path to `/healthz`. Use a paid always-on instance for live use.
 3. Run migrations and bootstrap **once, from your own machine** (they are explicit operator actions): build the image (`docker build -t zuscar-backend .`) and run
-   `docker run --rm -e DATABASE_URL="<supabase url>" zuscar-backend /app/migrate up`, then the same with `-it` and `/app/bootstrap ...` flags as in step 5. Use a **fresh** Supabase database, never a copy of a test one.
+   `docker run --rm -e DATABASE_URL="<supabase url>" --entrypoint /app/migrate zuscar-backend up`, then the same with `-it`, `--entrypoint /app/bootstrap` and the flags as in step 5. Use a **fresh** Supabase database, never a copy of a test one.
 4. Copy the Render service URL into the frontend's `BACKEND_URL` on Vercel and redeploy the frontend.
 
 ## Layout
-`cmd/` (api, migrate, bootstrap, seed-dev) · `internal/` (platform, identity, settings, provision, devseed) · `database/migrations` (SQL, applied in order) · `database/queries` (sqlc) · `docs/` · `scripts/sandbox` (authoring-sandbox helpers only, ignore).
+`cmd/` (api, migrate, bootstrap, seed-dev) · `internal/` (platform, identity, settings, catalogue, orders, sales, printing, provision, devseed) · `database/migrations` (SQL, applied in order) · `database/queries` (sqlc) · `docs/` · `scripts/sandbox` (authoring-sandbox helpers only, ignore).
 
 ## Dependencies and why
 `gin-gonic/gin` (HTTP router, mandated by the brief) · `jackc/pgx/v5` (PostgreSQL driver and pool, mandated) · `golang.org/x/crypto` (Argon2id password hashing) · `golang.org/x/term` (hidden password prompt in `bootstrap`). Generated repository code comes from sqlc (`make sqlc`, not a runtime dependency).

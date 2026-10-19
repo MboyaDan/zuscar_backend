@@ -21,4 +21,4 @@ Updated at Stage 7a. S-34 was approved by the owner; S-35 to S-37 are defaults i
 DG-02 (M-Pesa API route, gated), DG-03 (printer model and connection, tested with the printer test sheet), DG-04 (hosting plans and budget).
 
 ## Assumptions awaiting confirmation (defaults in use)
-S-01 to S-14, S-16, S-19, S-20, S-22 to S-33 are listed in `ASSUMPTIONS.md` with who must confirm each. S-13 is confirmed.
+S-01 to S-14, S-16, S-19, S-20, S-22 to S-33, S-59 to S-70 are listed in `ASSUMPTIONS.md` with who must confirm each. S-13 is confirmed.

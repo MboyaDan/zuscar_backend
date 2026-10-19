@@ -1708,6 +1708,47 @@ paths:
         '400': *id001
         '401': *id001
         '403': *id001
+  /api/v1/reconciliation/manual-receipts:
+    post:
+      summary: Enter a paper receipt written during an outage
+      description: 'Needs permission payments.reconcile and the Idempotency-Key header. One transaction: claims the key, refuses a paper receipt number already entered, takes the next receipt number, writes a sale with source outage_reconciliation (no order, no shift) with line snapshots and confirmed payments, the entry, and the audit event sale.outage_entered. manual_receipt_no is stored upper case with spaces removed (1 to 32 of A-Z 0-9 / . _ -). occurred_at must not be in the future or older than 31 days. Each line is a product, a quantity and the unit price on the paper receipt (tax included). paper_total_cents is the total written on the paper; if it differs from the lines, discrepancy_note is required (400). Payments follow the finalise rules except that they are confirmed at once; they may not add up to more than the total. Errors 409: duplicate_manual_receipt, duplicate_reference, tax_exclusive_unsupported, idempotency_conflict; 422 idempotency_key_reused. A replay returns the stored answer with Idempotent-Replayed: true.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: Idempotency-Key, in: header, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [manual_receipt_no, occurred_at, lines, paper_total_cents], properties: {manual_receipt_no: {type: string, maxLength: 32}, occurred_at: {type: string, format: date-time}, lines: {type: array, items: {type: object, required: [product_id, qty, unit_price_cents], properties: {product_id: {type: integer, format: int64}, qty: {type: integer, minimum: 1, maximum: 999}, unit_price_cents: {type: integer, format: int64, minimum: 0}}}}, payments: {type: array, items: {type: object, required: [method, amount_cents], properties: {method: {type: string, enum: [cash, mpesa_manual, card_manual, bank_manual]}, amount_cents: {type: integer, format: int64}, reference: {type: string, maxLength: 64}}}}, paper_total_cents: {type: integer, format: int64}, discrepancy_note: {type: string, maxLength: 200}, source_note: {type: string, maxLength: 200}}}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {type: object, properties: {sale: {$ref: '#/components/schemas/Sale'}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '409': *id001
+        '422': *id001
+    get:
+      summary: List the paper receipts entered
+      description: 'Needs permission payments.reconcile. Newest first. manual_receipt_no, when given, returns only the entry for that paper number (spacing and case are ignored), which is how the screen warns about a duplicate before submitting. Pages by limit (default 50, at most 200) and cursor.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: manual_receipt_no, in: query, schema: {type: string}}
+      - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200}}
+      - {name: cursor, in: query, schema: {type: integer, format: int64}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {entries: {type: array, items: {type: object, properties: {id: {type: integer, format: int64}, manual_receipt_no: {type: string}, sale_id: {type: integer, format: int64}, receipt_no: {type: integer, format: int64}, occurred_at: {type: string, format: date-time}, paper_total_cents: {type: integer, format: int64}, sale_total_cents: {type: integer, format: int64}, sale_status: {type: string}, entered_by: {type: integer, format: int64}, entered_by_name: {type: string}, discrepancy_note: {type: string}, source_note: {type: string}, entered_at: {type: string, format: date-time}}}}, next_cursor: {type: string}}}
+        '401': *id001
+        '403': *id001
   /api/v1/payments/{id}/confirm:
     post:
       summary: Confirm a pending payment
@@ -1977,7 +2018,7 @@ paths:
   /api/v1/print/jobs:
     post:
       summary: Queue the first print of a document
-      description: 'Needs a signed-in user and the permission of the document type (receipt sales.view, kitchen_ticket kitchen.view, bill sales.create, test_page none). The sale, ticket or bill must already exist; this never changes it. A voided sale's receipt gets 409 sale_voided. The job keeps a frozen copy of the document. A receipt or kitchen ticket has exactly one original job: asking again returns that job with 200 and created=false, so a double tap or a retry cannot queue a second first copy. A bill or test page always makes a new job. The Idempotency-Key header is optional because nothing money-related is created, but a screen that retries should send one: the same key returns the first answer (Idempotent-Replayed: true), the same key with a different body returns 422 idempotency_key_reused.'
+      description: 'Needs a signed-in user and the permission of the document type (receipt sales.view, kitchen_ticket kitchen.view, bill sales.create, test_page none). The sale, ticket or bill must already exist; this never changes it. A voided sale''s receipt gets 409 sale_voided, and a sale entered from a paper receipt gets 409 outage_entry. The job keeps a frozen copy of the document. A receipt or kitchen ticket has exactly one original job: asking again returns that job with 200 and created=false, so a double tap or a retry cannot queue a second first copy. A bill or test page always makes a new job. The Idempotency-Key header is optional because nothing money-related is created, but a screen that retries should send one: the same key returns the first answer (Idempotent-Replayed: true), the same key with a different body returns 422 idempotency_key_reused.'
       security:
       - sessionCookie: []
       parameters:
@@ -2123,6 +2164,7 @@ components:
         receipt_no: {type: integer, format: int64}
         order_id: {type: integer, format: int64, nullable: true}
         order_no: {type: integer, format: int64}
+        manual_receipt: {type: object, nullable: true, description: 'the paper receipt behind an outage entry (Stage 16)', properties: {manual_receipt_no: {type: string}, occurred_at: {type: string, format: date-time}, paper_total_cents: {type: integer, format: int64}, discrepancy_note: {type: string}, source_note: {type: string}, entered_by: {type: integer, format: int64}, entered_by_name: {type: string}}}
         business_date: {type: string, format: date}
         subtotal_cents: {type: integer, format: int64}
         discount_cents: {type: integer, format: int64}

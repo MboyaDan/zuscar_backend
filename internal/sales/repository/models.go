@@ -109,6 +109,18 @@ type LoginAttempt struct {
 	Success      bool
 }
 
+type ManualReceiptReconciliation struct {
+	ID                 int64
+	ManualReceiptNo    string
+	SaleID             int64
+	OriginalOccurredAt pgtype.Timestamptz
+	PaperTotalCents    int64
+	EnteredBy          int64
+	DiscrepancyNote    pgtype.Text
+	SourceNote         string
+	CreatedAt          pgtype.Timestamptz
+}
+
 type Modifier struct {
 	ID              int64
 	Name            string

@@ -272,6 +272,9 @@ func (s *Service) render(ctx context.Context, actor *auth.Principal, t target) (
 		if sale.Status == "voided" {
 			return nil, &ConflictError{Code: "sale_voided", Msg: "This sale was voided, so its receipt cannot be printed."}
 		}
+		if sale.Source == "outage_reconciliation" {
+			return nil, &ConflictError{Code: "outage_entry", Msg: "This sale was entered from a paper receipt, which the customer already has, so no receipt is printed for it."}
+		}
 		biz, inclusive, err := s.business(ctx, actor)
 		if err != nil {
 			return nil, err
