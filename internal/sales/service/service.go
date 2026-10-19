@@ -159,6 +159,7 @@ type SaleView struct {
 	Source        string         `json:"source"`
 	CashierID     int64          `json:"cashier_id"`
 	CashierName   string         `json:"cashier_name"`
+	ShiftID       *int64         `json:"shift_id"`
 	WaiterID      *int64         `json:"waiter_id"`
 	TaxStatus     string         `json:"tax_status"`
 	CreatedAt     time.Time      `json:"created_at"`
@@ -198,6 +199,7 @@ func (s *Service) load(ctx context.Context, q *repository.Queries, id int64) (Sa
 		w := h.WaiterID
 		v.WaiterID = &w
 	}
+	v.ShiftID = optID(h.ShiftID)
 	for _, i := range items {
 		v.Items = append(v.Items, SaleItemView{ID: i.ID, ProductID: i.ProductID, Name: i.NameSnapshot, Module: i.Module, Qty: i.Qty, UnitPriceCents: i.UnitPriceCents,
 			ModifiersText: i.ModifiersText, ModifiersCents: i.ModifiersCents, DiscountCents: i.DiscountCents, DiscountReason: i.DiscountReason, TaxCode: i.TaxCode,
@@ -469,6 +471,10 @@ func (s *Service) Finalise(ctx context.Context, actor *auth.Principal, orderID i
 		}
 
 		q := repository.New(tx)
+		shift, err := s.shiftFor(ctx, q, actor, hasCash(pays))
+		if err != nil {
+			return err
+		}
 		no, err := s.counters.NextNumber(ctx, tx, "receipt")
 		if err != nil {
 			return err
@@ -481,7 +487,7 @@ func (s *Service) Finalise(ctx context.Context, actor *auth.Principal, orderID i
 		day := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, time.UTC)
 		waiter := pgtype.Int8{Int64: o.OpenedBy, Valid: true}
 		saleID, err := q.InsertSale(ctx, repository.InsertSaleParams{ReceiptNo: no, OrderID: pgtype.Int8{Int64: o.ID, Valid: true}, BusinessDate: pgtype.Date{Time: day, Valid: true},
-			SubtotalCents: sub, DiscountCents: discount, TaxCents: tax, TotalCents: total, PaymentStatus: paymentStatus(total, confirmed), CashierID: actor.UserID, WaiterID: waiter, TaxStatus: ts.status})
+			SubtotalCents: sub, DiscountCents: discount, TaxCents: tax, TotalCents: total, PaymentStatus: paymentStatus(total, confirmed), CashierID: actor.UserID, WaiterID: waiter, TaxStatus: ts.status, ShiftID: shift})
 		if err != nil {
 			return err
 		}
@@ -509,7 +515,7 @@ func (s *Service) Finalise(ctx context.Context, actor *auth.Principal, orderID i
 				ref = pgtype.Text{String: p.Reference, Valid: true}
 			}
 			pid, err := q.InsertPayment(ctx, repository.InsertPaymentParams{SaleID: pgtype.Int8{Int64: saleID, Valid: true}, Method: p.Method, Status: status, AmountCents: p.AmountCents,
-				Reference: ref, CreatedBy: actor.UserID, ConfirmedBy: by, ConfirmedAt: at})
+				Reference: ref, CreatedBy: actor.UserID, ConfirmedBy: by, ConfirmedAt: at, ShiftID: shift})
 			if isUniqueRef(err) {
 				return &ConflictError{Code: "duplicate_reference", Field: "payments", Msg: "that " + p.Method + " reference was already recorded"}
 			}

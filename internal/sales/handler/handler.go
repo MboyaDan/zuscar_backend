@@ -39,6 +39,16 @@ func (h *Handler) Register(v1 *gin.RouterGroup, guard ...gin.HandlerFunc) {
 	s.GET("/:id", requirePermission("sales.view"), h.getSale)
 	s.POST("/:id/payments", create, idempotency.Required(), h.addPayment)
 
+	sh := v1.Group("/shifts", guard...)
+	manage := requirePermission("shifts.manage")
+	sh.POST("/open", manage, idempotency.Required(), h.openShift)
+	sh.GET("/current", manage, h.currentShift)
+	sh.GET("", requirePermission("shifts.close"), h.listShifts)
+	sh.GET("/:id/summary", manage, h.shiftSummary)
+	sh.POST("/:id/cash-movements", manage, idempotency.Required(), h.addMovement)
+	sh.POST("/:id/close", requirePermission("shifts.close"), idempotency.Required(), h.closeShift)
+	sh.POST("/:id/reconcile", requirePermission("payments.reconcile"), idempotency.Required(), h.reconcileShift)
+
 	pm := v1.Group("/payments", guard...)
 	pm.GET("", requirePermission("sales.view"), h.listPayments)
 	reconcile := requirePermission("payments.reconcile")
@@ -337,6 +347,153 @@ func (h *Handler) listSales(c *gin.Context) {
 		res["next_cursor"] = strconv.FormatInt(items[len(items)-1].ID, 10)
 	}
 	c.JSON(http.StatusOK, res)
+}
+
+func (h *Handler) openShift(c *gin.Context) {
+	var in struct {
+		OpeningFloatCents int64  `json:"opening_float_cents"`
+		Notes             string `json:"notes"`
+	}
+	if !body(c, &in) {
+		return
+	}
+	st, out, err := h.svc.OpenShift(c.Request.Context(), auth.From(c), service.OpenShiftInput{OpeningFloatCents: in.OpeningFloatCents, Notes: in.Notes}, idempotency.From(c), meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	if st != nil {
+		replay(c, st)
+		return
+	}
+	c.JSON(http.StatusCreated, out)
+}
+
+func (h *Handler) currentShift(c *gin.Context) {
+	out, err := h.svc.CurrentShift(c.Request.Context(), auth.From(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"summary": out})
+}
+
+func (h *Handler) shiftSummary(c *gin.Context) {
+	id, ok := idParam(c, "shift")
+	if !ok {
+		return
+	}
+	out, err := h.svc.ShiftSummary(c.Request.Context(), auth.From(c), id)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"summary": out})
+}
+
+func (h *Handler) listShifts(c *gin.Context) {
+	var f service.ShiftFilter
+	var ok bool
+	if f.Status, ok = oneOf(c, "status", "open", "closed", "reconciled"); !ok {
+		return
+	}
+	if f.UserID, ok = queryInt(c, "user_id"); !ok {
+		return
+	}
+	if f.BeforeID, ok = queryInt(c, "cursor"); !ok {
+		return
+	}
+	lim, ok := queryInt(c, "limit")
+	if !ok {
+		return
+	}
+	f.Limit = int(lim)
+	items, more, err := h.svc.ListShifts(c.Request.Context(), auth.From(c), f)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	res := gin.H{"shifts": items}
+	if more {
+		res["next_cursor"] = strconv.FormatInt(items[len(items)-1].ID, 10)
+	}
+	c.JSON(http.StatusOK, res)
+}
+
+func (h *Handler) addMovement(c *gin.Context) {
+	id, ok := idParam(c, "shift")
+	if !ok {
+		return
+	}
+	var in struct {
+		Kind        string `json:"kind"`
+		AmountCents int64  `json:"amount_cents"`
+		Reason      string `json:"reason"`
+	}
+	if !body(c, &in) {
+		return
+	}
+	st, out, err := h.svc.AddCashMovement(c.Request.Context(), auth.From(c), id, service.MovementInput{Kind: in.Kind, AmountCents: in.AmountCents, Reason: in.Reason}, idempotency.From(c), meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	if st != nil {
+		replay(c, st)
+		return
+	}
+	c.JSON(http.StatusCreated, out)
+}
+
+func (h *Handler) closeShift(c *gin.Context) {
+	id, ok := idParam(c, "shift")
+	if !ok {
+		return
+	}
+	var in struct {
+		DeclaredCashCents *int64 `json:"declared_cash_cents"`
+		Notes             string `json:"notes"`
+	}
+	if !body(c, &in) {
+		return
+	}
+	if in.DeclaredCashCents == nil {
+		zhttp.WriteError(c, http.StatusBadRequest, "validation_failed", "Some fields are invalid.", zhttp.FieldError{Field: "declared_cash_cents", Message: "is required: count the cash in the drawer"})
+		return
+	}
+	st, out, err := h.svc.CloseShift(c.Request.Context(), auth.From(c), id, service.CloseInput{DeclaredCashCents: *in.DeclaredCashCents, Notes: in.Notes}, idempotency.From(c), meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	if st != nil {
+		replay(c, st)
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+func (h *Handler) reconcileShift(c *gin.Context) {
+	id, ok := idParam(c, "shift")
+	if !ok {
+		return
+	}
+	var in struct {
+		Note string `json:"note"`
+	}
+	if !body(c, &in) {
+		return
+	}
+	st, out, err := h.svc.ReconcileShift(c.Request.Context(), auth.From(c), id, in.Note, idempotency.From(c), meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	if st != nil {
+		replay(c, st)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"shift": out})
 }
 
 func (h *Handler) fail(c *gin.Context, err error) {
