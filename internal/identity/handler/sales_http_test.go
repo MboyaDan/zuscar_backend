@@ -175,7 +175,7 @@ func TestAC01_FinaliseSnapshotsCorrect(t *testing.T) {
 	// A retry with the same key returns the stored sale and uses no new receipt number.
 	r = finalise(tj, a, "sale-key-0006", good)
 	expect(t, r.ResponseRecorder, 201, "")
-	if r.Header().Get("Idempotent-Replay") != "true" || decodeInto[saleResp](t, r.ResponseRecorder).Sale.ID != sale.ID || e.count(`SELECT count(*) FROM sales`) != 1 || nextReceipt() != first+1 {
+	if r.Header().Get("Idempotent-Replayed") != "true" || decodeInto[saleResp](t, r.ResponseRecorder).Sale.ID != sale.ID || e.count(`SELECT count(*) FROM sales`) != 1 || nextReceipt() != first+1 {
 		t.Fatal("a replay must return the stored sale and create nothing")
 	}
 	expect(t, finalise(tj, a, "sale-key-0006", map[string]any{"payments": []map[string]any{{"method": "cash", "amount_cents": 1}}}).ResponseRecorder, 422, "idempotency_key_reused")
@@ -411,7 +411,7 @@ func TestAC01_RetrySameKeyReturnsStoredSale(t *testing.T) {
 	again := l.finalise(o, "retry-key-0001", map[string]any{})
 	expect(t, again.ResponseRecorder, 201, "")
 	a, b := decodeInto[saleResp](t, first.ResponseRecorder).Sale, decodeInto[saleResp](t, again.ResponseRecorder).Sale
-	if a.ID != b.ID || a.ReceiptNo != b.ReceiptNo || again.Header().Get("Idempotent-Replay") != "true" {
+	if a.ID != b.ID || a.ReceiptNo != b.ReceiptNo || again.Header().Get("Idempotent-Replayed") != "true" {
 		t.Fatalf("a retry must return the stored sale: %+v vs %+v", a, b)
 	}
 	if l.e.rows(`SELECT count(*) FROM sales`) != 1 || l.receipts() != start+1 {

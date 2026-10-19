@@ -74,7 +74,7 @@ func TestAC02_RetryPaymentNotDoubleRecorded(t *testing.T) {
 	again := l.pay(sale, l.till, "pay-key-000001", body)
 	expect(t, again.ResponseRecorder, 201, "")
 	a, b := decodeInto[payResp](t, r.ResponseRecorder).Payment, decodeInto[payResp](t, again.ResponseRecorder).Payment
-	if again.Header().Get("Idempotent-Replay") != "true" || a.ID == 0 || a.ID != b.ID || a.AmountCents != b.AmountCents {
+	if again.Header().Get("Idempotent-Replayed") != "true" || a.ID == 0 || a.ID != b.ID || a.AmountCents != b.AmountCents {
 		t.Fatalf("a retry must return the stored answer: %s vs %s", again.Body.String(), r.Body.String())
 	}
 	if n := l.e.count(`SELECT count(*) FROM payments WHERE sale_id = $1`, sale); n != 1 {
@@ -220,7 +220,7 @@ func TestStage11b_ConfirmAndFailRules(t *testing.T) {
 	// A retry returns the stored answer; a new key on a confirmed payment is an invalid transition.
 	again := do(mj, "confirm", "cf-confirm-001", map[string]any{"note": "seen on statement"})
 	expect(t, again.ResponseRecorder, 200, "")
-	if again.Header().Get("Idempotent-Replay") != "true" {
+	if again.Header().Get("Idempotent-Replayed") != "true" {
 		t.Fatal("expected a replay")
 	}
 	expect(t, do(mj, "confirm", "cf-confirm-002", map[string]any{}).ResponseRecorder, 409, "invalid_transition")

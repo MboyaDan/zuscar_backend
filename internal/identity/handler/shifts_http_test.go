@@ -142,7 +142,7 @@ func TestAC09_VarianceStoredNotAbsorbed(t *testing.T) {
 	// A retry returns the stored answer.
 	again := &sendResp{s.e.do(req{method: "POST", path: "/api/v1/shifts/" + itoa(sh) + "/close", jar: s.till, header: map[string]string{"Idempotency-Key": key}, body: body})}
 	expect(t, again.ResponseRecorder, 200, "")
-	if again.Header().Get("Idempotent-Replay") != "true" {
+	if again.Header().Get("Idempotent-Replayed") != "true" {
 		t.Fatal("expected a replay")
 	}
 	// Closed means closed: no second close, no cash movements, no cash payments, no edits of the figures.
@@ -216,7 +216,7 @@ func TestStage12_ShiftRules(t *testing.T) {
 	expect(t, r.ResponseRecorder, 201, "")
 	again := open(t2, "open-ok-0000001", map[string]any{"opening_float_cents": 1000})
 	expect(t, again.ResponseRecorder, 201, "")
-	if again.Header().Get("Idempotent-Replay") != "true" || s.e.count(`SELECT count(*) FROM cashier_shifts WHERE user_id = (SELECT id FROM users WHERE username = 'till2')`) != 1 {
+	if again.Header().Get("Idempotent-Replayed") != "true" || s.e.count(`SELECT count(*) FROM cashier_shifts WHERE user_id = (SELECT id FROM users WHERE username = 'till2')`) != 1 {
 		t.Fatal("a retry must not open a second shift")
 	}
 	if _, err := s.e.pool.Exec(t.Context(), `INSERT INTO cashier_shifts (user_id, opening_float_cents) SELECT id, 0 FROM users WHERE username = 'till2'`); err == nil {

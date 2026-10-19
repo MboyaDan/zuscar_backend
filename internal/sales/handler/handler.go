@@ -142,7 +142,7 @@ func (h *Handler) finalise(c *gin.Context) {
 		}
 		_ = json.Unmarshal(replayed.Body, &r)
 		c.Header("Location", "/api/v1/sales/"+strconv.FormatInt(r.Sale.ID, 10))
-		c.Header("Idempotent-Replay", "true")
+		c.Header(idempotency.ReplayHeader, "true")
 		c.Data(replayed.Status, "application/json; charset=utf-8", replayed.Body)
 		return
 	}
@@ -178,7 +178,7 @@ func body(c *gin.Context, into any) bool {
 }
 
 func replay(c *gin.Context, st *idempotency.Stored) {
-	c.Header("Idempotent-Replay", "true")
+	c.Header(idempotency.ReplayHeader, "true")
 	c.Data(st.Status, "application/json; charset=utf-8", st.Body)
 }
 
