@@ -84,8 +84,8 @@ POST,/api/v1/print/jobs/{id}/retry,authenticated,-,14,same job only
 POST,/api/v1/print/jobs/{id}/reprint,sales.reprint,-,14,"new job, REPRINT marker; tickets need kitchen.view"
 GET,/api/v1/print/jobs,authenticated,-,14,
 GET,/api/v1/print/test-page,authenticated,-,14,"AC-16, DG-03"
-POST,/api/v1/reconciliation/manual-receipts,payments.reconcile,Y,16,duplicate guard on manual receipt number
-GET,/api/v1/reconciliation/manual-receipts,payments.reconcile,-,16,
+POST,/api/v1/reconciliation/manual-receipts,payments.reconcile,Y,16,"paper receipt from an outage; duplicate paper number refused (409); entered as a confirmed sale, no shift, no receipt printed"
+GET,/api/v1/reconciliation/manual-receipts,payments.reconcile,-,16,"newest first; ?manual_receipt_no= finds one"
 GET,/api/v1/inventory/items,inventory.view,-,17,
 POST,/api/v1/inventory/items,inventory.adjust,-,17,
 PATCH,/api/v1/inventory/items/{id},inventory.adjust,-,17,

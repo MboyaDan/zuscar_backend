@@ -485,6 +485,51 @@ func (q *Queries) ListOrders(ctx context.Context, arg ListOrdersParams) ([]ListO
 	return items, nil
 }
 
+const listProductsForSale = `-- name: ListProductsForSale :many
+SELECT p.id, p.name, c.module, t.code AS tax_code, t.treatment AS tax_treatment, t.rate_bp AS tax_rate_bp
+FROM products p
+JOIN categories c ON c.id = p.category_id
+JOIN tax_rates t ON t.id = p.tax_rate_id
+WHERE p.id = ANY($1::bigint[])
+`
+
+type ListProductsForSaleRow struct {
+	ID           int64
+	Name         string
+	Module       string
+	TaxCode      string
+	TaxTreatment string
+	TaxRateBp    int32
+}
+
+// Stage 16: products with the tax they carry, for an outage entry (a paper receipt entered later). Sales never reads the catalogue tables itself.
+func (q *Queries) ListProductsForSale(ctx context.Context, dollar_1 []int64) ([]ListProductsForSaleRow, error) {
+	rows, err := q.db.Query(ctx, listProductsForSale, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListProductsForSaleRow
+	for rows.Next() {
+		var i ListProductsForSaleRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Module,
+			&i.TaxCode,
+			&i.TaxTreatment,
+			&i.TaxRateBp,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSaleLines = `-- name: ListSaleLines :many
 SELECT i.id, i.product_id, p.name AS product_name, c.module, i.qty, i.unit_price_cents,
        COALESCE((SELECT sum(m.price_delta_cents) FROM order_item_modifiers m WHERE m.order_item_id = i.id), 0)::bigint AS modifiers_cents,

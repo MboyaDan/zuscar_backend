@@ -112,3 +112,11 @@ WHERE i.order_id = $1 AND i.status = 'active' ORDER BY i.id;
 
 -- name: MarkOrderFinalised :exec
 UPDATE orders SET status = 'finalised', version = version + 1, updated_at = now() WHERE id = $1 AND status IN ('open', 'sent');
+
+-- Stage 16: products with the tax they carry, for an outage entry (a paper receipt entered later). Sales never reads the catalogue tables itself.
+-- name: ListProductsForSale :many
+SELECT p.id, p.name, c.module, t.code AS tax_code, t.treatment AS tax_treatment, t.rate_bp AS tax_rate_bp
+FROM products p
+JOIN categories c ON c.id = p.category_id
+JOIN tax_rates t ON t.id = p.tax_rate_id
+WHERE p.id = ANY($1::bigint[]);

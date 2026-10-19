@@ -101,3 +101,27 @@ func (s *Service) OrderForSale(ctx context.Context, tx pgx.Tx, actor *auth.Princ
 func (s *Service) MarkFinalised(ctx context.Context, tx pgx.Tx, orderID int64) error {
 	return repository.New(tx).MarkOrderFinalised(ctx, orderID)
 }
+
+// ProductForSale is a product as an outage entry needs it: its name and the tax it carries now. The price is not
+// here: the paper receipt says what was charged.
+type ProductForSale struct {
+	ID           int64
+	Name         string
+	Module       string
+	TaxCode      string
+	TaxTreatment string
+	TaxRateBP    int32
+}
+
+// ProductsForSale returns the named products by id; an id that does not exist is simply missing from the map.
+func (s *Service) ProductsForSale(ctx context.Context, tx pgx.Tx, ids []int64) (map[int64]ProductForSale, error) {
+	rows, err := repository.New(tx).ListProductsForSale(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]ProductForSale, len(rows))
+	for _, r := range rows {
+		out[r.ID] = ProductForSale{ID: r.ID, Name: r.Name, Module: r.Module, TaxCode: r.TaxCode, TaxTreatment: r.TaxTreatment, TaxRateBP: r.TaxRateBp}
+	}
+	return out, nil
+}

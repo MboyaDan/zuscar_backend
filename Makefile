@@ -15,13 +15,13 @@ logs: ## follow API logs
 	docker compose logs -f backend
 
 migrate: ## apply pending migrations (explicit, never automatic)
-	docker compose run --rm backend /app/migrate up
+	docker compose run --rm --entrypoint /app/migrate backend up
 
 migrate-status: ## list migrations and whether they are applied
-	docker compose run --rm backend /app/migrate status
+	docker compose run --rm --entrypoint /app/migrate backend status
 
 seed-dev: ## load FAKE development users (refuses when APP_ENV=production)
-	docker compose run --rm backend /app/seed-dev
+	docker compose run --rm --entrypoint /app/seed-dev backend
 
 test: ## all Go tests including database tests, in Docker
 	docker compose run --rm test

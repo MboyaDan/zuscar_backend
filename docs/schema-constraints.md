@@ -64,7 +64,7 @@ Super Admin guards (AC-11, AC-12; full rules in `rbac.md`):
 | sale_voids | sale_id UNIQUE, reason NOT NULL, voided_by, approved_by, voided_at. Void creates compensating payment and stock records; sale row keeps original data. |
 | cashier_shifts | user_id, opened_at, opening_float_cents >= 0, closed_at, declared_cash_cents, expected_cash_cents (snapshot at close), variance_cents (= declared - expected), status IN (open, closed, reconciled), closed_by, reconciled_by, notes. Partial UNIQUE (user_id) WHERE status = 'open' (one open shift per user). CHECK closed fields present iff status <> open. |
 | cash_movements | shift_id, kind IN (paid_in, paid_out, expense), amount_cents > 0, reason NOT NULL, created_by. Immutable. Expected cash = float + confirmed cash payments - cash refunds + paid_in - paid_out - expense, all from rows (AC-09). |
-| manual_receipt_reconciliations | manual_receipt_no UNIQUE, original_occurred_at, sale_id FK UNIQUE, entered_by, discrepancy_note, source_note. Duplicate guard is the UNIQUE plus sales.manual_receipt_no; both created in one transaction. |
+| manual_receipt_reconciliations | manual_receipt_no UNIQUE (1 to 32 characters), original_occurred_at, paper_total_cents, sale_id FK UNIQUE, entered_by, discrepancy_note (required when paper_total_cents differs from the sale total), source_note. Duplicate guard is the UNIQUE plus sales.manual_receipt_no. Insert trigger checks the sale is an outage sale with the same paper number and the time is not in the future; a deferred constraint trigger on `sales` refuses an outage sale committed without its entry; rows are immutable (migration 0017). |
 
 ## 5. Inventory and purchasing
 | Table | Constraints and notes |

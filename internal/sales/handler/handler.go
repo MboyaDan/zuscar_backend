@@ -53,6 +53,10 @@ func (h *Handler) Register(v1 *gin.RouterGroup, guard ...gin.HandlerFunc) {
 	sh.POST("/:id/close", requirePermission("shifts.close"), idempotency.Required(), h.closeShift)
 	sh.POST("/:id/reconcile", requirePermission("payments.reconcile"), idempotency.Required(), h.reconcileShift)
 
+	rc := v1.Group("/reconciliation", guard...)
+	rc.POST("/manual-receipts", requirePermission("payments.reconcile"), idempotency.Required(), h.enterManualReceipt)
+	rc.GET("/manual-receipts", requirePermission("payments.reconcile"), h.listManualReceipts)
+
 	pm := v1.Group("/payments", guard...)
 	pm.GET("", requirePermission("sales.view"), h.listPayments)
 	reconcile := requirePermission("payments.reconcile")
@@ -608,4 +612,85 @@ func (h *Handler) fail(c *gin.Context, err error) {
 		h.log.Error("sales error", "request_id", zhttp.RequestIDFrom(c), "error", err.Error())
 		zhttp.WriteError(c, http.StatusInternalServerError, "internal_error", "Something went wrong. Please try again.")
 	}
+}
+
+// enterManualReceipt records one paper receipt written during an outage (Stage 16, AC-17).
+func (h *Handler) enterManualReceipt(c *gin.Context) {
+	var in struct {
+		ManualReceiptNo string    `json:"manual_receipt_no"`
+		OccurredAt      time.Time `json:"occurred_at"`
+		Lines           []struct {
+			ProductID      int64 `json:"product_id"`
+			Qty            int32 `json:"qty"`
+			UnitPriceCents int64 `json:"unit_price_cents"`
+		} `json:"lines"`
+		Payments []struct {
+			Method      string `json:"method"`
+			AmountCents int64  `json:"amount_cents"`
+			Reference   string `json:"reference"`
+		} `json:"payments"`
+		PaperTotalCents *int64 `json:"paper_total_cents"`
+		DiscrepancyNote string `json:"discrepancy_note"`
+		SourceNote      string `json:"source_note"`
+	}
+	dec := json.NewDecoder(c.Request.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil {
+		zhttp.WriteError(c, http.StatusBadRequest, "validation_failed", "The request body is not valid JSON.", zhttp.FieldError{Field: "body", Message: "invalid or unexpected JSON"})
+		return
+	}
+	if in.PaperTotalCents == nil {
+		zhttp.WriteError(c, http.StatusBadRequest, "validation_failed", "Some fields are invalid.", zhttp.FieldError{Field: "paper_total_cents", Message: "is required: the total written on the paper receipt"})
+		return
+	}
+	req := service.OutageInput{ManualReceiptNo: in.ManualReceiptNo, OccurredAt: in.OccurredAt, PaperTotalCents: *in.PaperTotalCents, DiscrepancyNote: in.DiscrepancyNote, SourceNote: in.SourceNote}
+	for _, l := range in.Lines {
+		req.Lines = append(req.Lines, service.OutageLineInput{ProductID: l.ProductID, Qty: l.Qty, UnitPriceCents: l.UnitPriceCents})
+	}
+	for _, p := range in.Payments {
+		req.Payments = append(req.Payments, service.PaymentInput{Method: p.Method, AmountCents: p.AmountCents, Reference: p.Reference})
+	}
+	out, replayed, err := h.svc.EnterManualReceipt(c.Request.Context(), auth.From(c), req, idempotency.From(c), meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	if replayed != nil {
+		var r struct {
+			Sale struct {
+				ID int64 `json:"id"`
+			} `json:"sale"`
+		}
+		_ = json.Unmarshal(replayed.Body, &r)
+		c.Header("Location", "/api/v1/sales/"+strconv.FormatInt(r.Sale.ID, 10))
+		c.Header(idempotency.ReplayHeader, "true")
+		c.Data(replayed.Status, "application/json; charset=utf-8", replayed.Body)
+		return
+	}
+	c.Header("Location", "/api/v1/sales/"+strconv.FormatInt(out.ID, 10))
+	c.JSON(http.StatusCreated, gin.H{"sale": out})
+}
+
+func (h *Handler) listManualReceipts(c *gin.Context) {
+	var f service.ManualReceiptFilter
+	var ok bool
+	f.ManualReceiptNo = c.Query("manual_receipt_no")
+	if f.BeforeID, ok = queryInt(c, "cursor"); !ok {
+		return
+	}
+	lim, ok := queryInt(c, "limit")
+	if !ok {
+		return
+	}
+	f.Limit = int(lim)
+	items, more, err := h.svc.ListManualReceipts(c.Request.Context(), auth.From(c), f)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	res := gin.H{"entries": items}
+	if more {
+		res["next_cursor"] = strconv.FormatInt(items[len(items)-1].ID, 10)
+	}
+	c.JSON(http.StatusOK, res)
 }
