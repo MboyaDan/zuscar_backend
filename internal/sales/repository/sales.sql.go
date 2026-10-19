@@ -11,6 +11,105 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const confirmPayment = `-- name: ConfirmPayment :exec
+UPDATE payments SET status = 'confirmed', confirmed_by = $2, confirmed_at = now(), note = $3, updated_at = now() WHERE id = $1
+`
+
+type ConfirmPaymentParams struct {
+	ID          int64
+	ConfirmedBy pgtype.Int8
+	Note        string
+}
+
+func (q *Queries) ConfirmPayment(ctx context.Context, arg ConfirmPaymentParams) error {
+	_, err := q.db.Exec(ctx, confirmPayment, arg.ID, arg.ConfirmedBy, arg.Note)
+	return err
+}
+
+const failPayment = `-- name: FailPayment :exec
+UPDATE payments SET status = 'failed', failed_by = $2, failed_at = now(), note = $3, updated_at = now() WHERE id = $1
+`
+
+type FailPaymentParams struct {
+	ID       int64
+	FailedBy pgtype.Int8
+	Note     string
+}
+
+func (q *Queries) FailPayment(ctx context.Context, arg FailPaymentParams) error {
+	_, err := q.db.Exec(ctx, failPayment, arg.ID, arg.FailedBy, arg.Note)
+	return err
+}
+
+const getPaymentRecord = `-- name: GetPaymentRecord :one
+SELECT p.id, p.sale_id, COALESCE(s.receipt_no, 0)::bigint AS receipt_no, p.method, p.status, p.amount_cents, COALESCE(p.reference, '')::text AS reference,
+       p.created_by, cu.display_name AS created_by_name, p.created_at, COALESCE(p.confirmed_by, 0)::bigint AS confirmed_by, p.confirmed_at,
+       COALESCE(p.failed_by, 0)::bigint AS failed_by, p.failed_at, p.note, COALESCE(p.shift_id, 0)::bigint AS shift_id
+FROM payments p
+LEFT JOIN sales s ON s.id = p.sale_id
+JOIN users cu ON cu.id = p.created_by
+WHERE p.id = $1
+`
+
+type GetPaymentRecordRow struct {
+	ID            int64
+	SaleID        pgtype.Int8
+	ReceiptNo     int64
+	Method        string
+	Status        string
+	AmountCents   int64
+	Reference     string
+	CreatedBy     int64
+	CreatedByName string
+	CreatedAt     pgtype.Timestamptz
+	ConfirmedBy   int64
+	ConfirmedAt   pgtype.Timestamptz
+	FailedBy      int64
+	FailedAt      pgtype.Timestamptz
+	Note          string
+	ShiftID       int64
+}
+
+func (q *Queries) GetPaymentRecord(ctx context.Context, id int64) (GetPaymentRecordRow, error) {
+	row := q.db.QueryRow(ctx, getPaymentRecord, id)
+	var i GetPaymentRecordRow
+	err := row.Scan(
+		&i.ID,
+		&i.SaleID,
+		&i.ReceiptNo,
+		&i.Method,
+		&i.Status,
+		&i.AmountCents,
+		&i.Reference,
+		&i.CreatedBy,
+		&i.CreatedByName,
+		&i.CreatedAt,
+		&i.ConfirmedBy,
+		&i.ConfirmedAt,
+		&i.FailedBy,
+		&i.FailedAt,
+		&i.Note,
+		&i.ShiftID,
+	)
+	return i, err
+}
+
+const getPaymentTarget = `-- name: GetPaymentTarget :one
+SELECT id, sale_id FROM payments WHERE id = $1
+`
+
+type GetPaymentTargetRow struct {
+	ID     int64
+	SaleID pgtype.Int8
+}
+
+func (q *Queries) GetPaymentTarget(ctx context.Context, id int64) (GetPaymentTargetRow, error) {
+	row := q.db.QueryRow(ctx, getPaymentTarget, id)
+	var i GetPaymentTargetRow
+	err := row.Scan(&i.ID, &i.SaleID)
+	return i, err
+}
+
 const getSaleHead = `-- name: GetSaleHead :one
 SELECT s.id, s.receipt_no, COALESCE(s.order_id, 0)::bigint AS order_id, COALESCE(o.order_no, 0)::bigint AS order_no, s.business_date, s.subtotal_cents, s.discount_cents,
        s.tax_cents, s.total_cents, s.status, s.payment_status, s.source, s.cashier_id, cu.display_name AS cashier_name, COALESCE(s.waiter_id, 0)::bigint AS waiter_id,
@@ -202,6 +301,98 @@ func (q *Queries) InsertSaleItem(ctx context.Context, arg InsertSaleItemParams) 
 	return err
 }
 
+const listPayments = `-- name: ListPayments :many
+SELECT p.id, p.sale_id, COALESCE(s.receipt_no, 0)::bigint AS receipt_no, p.method, p.status, p.amount_cents, COALESCE(p.reference, '')::text AS reference,
+       p.created_by, cu.display_name AS created_by_name, p.created_at, COALESCE(p.confirmed_by, 0)::bigint AS confirmed_by, p.confirmed_at,
+       COALESCE(p.failed_by, 0)::bigint AS failed_by, p.failed_at, p.note, COALESCE(p.shift_id, 0)::bigint AS shift_id
+FROM payments p
+LEFT JOIN sales s ON s.id = p.sale_id
+JOIN users cu ON cu.id = p.created_by
+WHERE ($1::text = '' OR p.status = $1::text)
+  AND ($2::text = '' OR p.method = $2::text)
+  AND ($3::bigint = 0 OR p.shift_id = $3::bigint)
+  AND ($4::bigint = 0 OR p.sale_id = $4::bigint)
+  AND ($5::bigint = 0 OR s.cashier_id = $5::bigint OR s.waiter_id = $5::bigint)
+  AND ($6::bigint = 0 OR p.id < $6::bigint)
+ORDER BY p.id DESC
+LIMIT $7::int
+`
+
+type ListPaymentsParams struct {
+	Status   string
+	Method   string
+	ShiftID  int64
+	SaleID   int64
+	OnlyUser int64
+	BeforeID int64
+	RowLimit int32
+}
+
+type ListPaymentsRow struct {
+	ID            int64
+	SaleID        pgtype.Int8
+	ReceiptNo     int64
+	Method        string
+	Status        string
+	AmountCents   int64
+	Reference     string
+	CreatedBy     int64
+	CreatedByName string
+	CreatedAt     pgtype.Timestamptz
+	ConfirmedBy   int64
+	ConfirmedAt   pgtype.Timestamptz
+	FailedBy      int64
+	FailedAt      pgtype.Timestamptz
+	Note          string
+	ShiftID       int64
+}
+
+// Newest first. only_user limits the list to payments on sales that person took or served (S-47); zero means no limit.
+func (q *Queries) ListPayments(ctx context.Context, arg ListPaymentsParams) ([]ListPaymentsRow, error) {
+	rows, err := q.db.Query(ctx, listPayments,
+		arg.Status,
+		arg.Method,
+		arg.ShiftID,
+		arg.SaleID,
+		arg.OnlyUser,
+		arg.BeforeID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPaymentsRow
+	for rows.Next() {
+		var i ListPaymentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SaleID,
+			&i.ReceiptNo,
+			&i.Method,
+			&i.Status,
+			&i.AmountCents,
+			&i.Reference,
+			&i.CreatedBy,
+			&i.CreatedByName,
+			&i.CreatedAt,
+			&i.ConfirmedBy,
+			&i.ConfirmedAt,
+			&i.FailedBy,
+			&i.FailedAt,
+			&i.Note,
+			&i.ShiftID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSaleItems = `-- name: ListSaleItems :many
 SELECT id, product_id, name_snapshot, module, qty, unit_price_cents, modifiers_text, modifiers_cents, discount_cents, COALESCE(discount_reason, '')::text AS discount_reason,
        tax_code, tax_treatment, tax_rate_bp, tax_cents, line_total_cents
@@ -305,6 +496,149 @@ func (q *Queries) ListSalePayments(ctx context.Context, saleID pgtype.Int8) ([]L
 		return nil, err
 	}
 	return items, nil
+}
+
+const listSales = `-- name: ListSales :many
+SELECT s.id, s.receipt_no, COALESCE(s.order_id, 0)::bigint AS order_id, COALESCE(o.order_no, 0)::bigint AS order_no, s.business_date, s.subtotal_cents,
+       s.discount_cents, s.tax_cents, s.total_cents, s.status, s.payment_status, s.source, s.cashier_id, cu.display_name AS cashier_name,
+       COALESCE(s.waiter_id, 0)::bigint AS waiter_id, s.created_at,
+       COALESCE((SELECT sum(p.amount_cents) FROM payments p WHERE p.sale_id = s.id AND p.status = 'confirmed'), 0)::bigint AS paid_cents,
+       COALESCE((SELECT sum(p.amount_cents) FROM payments p WHERE p.sale_id = s.id AND p.status = 'pending_confirmation'), 0)::bigint AS pending_cents
+FROM sales s
+JOIN users cu ON cu.id = s.cashier_id
+LEFT JOIN orders o ON o.id = s.order_id
+WHERE ($1::text = '' OR s.status = $1::text)
+  AND ($2::text = '' OR s.payment_status = $2::text)
+  AND ($3::date IS NULL OR s.business_date = $3::date)
+  AND ($4::bigint = 0 OR s.cashier_id = $4::bigint OR s.waiter_id = $4::bigint)
+  AND ($5::bigint = 0 OR s.id < $5::bigint)
+ORDER BY s.id DESC
+LIMIT $6::int
+`
+
+type ListSalesParams struct {
+	Status        string
+	PaymentStatus string
+	BusinessDate  pgtype.Date
+	OnlyUser      int64
+	BeforeID      int64
+	RowLimit      int32
+}
+
+type ListSalesRow struct {
+	ID            int64
+	ReceiptNo     int64
+	OrderID       int64
+	OrderNo       int64
+	BusinessDate  pgtype.Date
+	SubtotalCents int64
+	DiscountCents int64
+	TaxCents      int64
+	TotalCents    int64
+	Status        string
+	PaymentStatus string
+	Source        string
+	CashierID     int64
+	CashierName   string
+	WaiterID      int64
+	CreatedAt     pgtype.Timestamptz
+	PaidCents     int64
+	PendingCents  int64
+}
+
+func (q *Queries) ListSales(ctx context.Context, arg ListSalesParams) ([]ListSalesRow, error) {
+	rows, err := q.db.Query(ctx, listSales,
+		arg.Status,
+		arg.PaymentStatus,
+		arg.BusinessDate,
+		arg.OnlyUser,
+		arg.BeforeID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSalesRow
+	for rows.Next() {
+		var i ListSalesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ReceiptNo,
+			&i.OrderID,
+			&i.OrderNo,
+			&i.BusinessDate,
+			&i.SubtotalCents,
+			&i.DiscountCents,
+			&i.TaxCents,
+			&i.TotalCents,
+			&i.Status,
+			&i.PaymentStatus,
+			&i.Source,
+			&i.CashierID,
+			&i.CashierName,
+			&i.WaiterID,
+			&i.CreatedAt,
+			&i.PaidCents,
+			&i.PendingCents,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockPayment = `-- name: LockPayment :one
+SELECT id, sale_id, status FROM payments WHERE id = $1 FOR UPDATE
+`
+
+type LockPaymentRow struct {
+	ID     int64
+	SaleID pgtype.Int8
+	Status string
+}
+
+func (q *Queries) LockPayment(ctx context.Context, id int64) (LockPaymentRow, error) {
+	row := q.db.QueryRow(ctx, lockPayment, id)
+	var i LockPaymentRow
+	err := row.Scan(&i.ID, &i.SaleID, &i.Status)
+	return i, err
+}
+
+const lockSale = `-- name: LockSale :one
+
+SELECT id, receipt_no, status, payment_status, total_cents, cashier_id, COALESCE(waiter_id, 0)::bigint AS waiter_id
+FROM sales WHERE id = $1 FOR UPDATE
+`
+
+type LockSaleRow struct {
+	ID            int64
+	ReceiptNo     int64
+	Status        string
+	PaymentStatus string
+	TotalCents    int64
+	CashierID     int64
+	WaiterID      int64
+}
+
+// Stage 11b: later payments, confirmation, failure, and the sales and payments lists.
+func (q *Queries) LockSale(ctx context.Context, id int64) (LockSaleRow, error) {
+	row := q.db.QueryRow(ctx, lockSale, id)
+	var i LockSaleRow
+	err := row.Scan(
+		&i.ID,
+		&i.ReceiptNo,
+		&i.Status,
+		&i.PaymentStatus,
+		&i.TotalCents,
+		&i.CashierID,
+		&i.WaiterID,
+	)
+	return i, err
 }
 
 const paymentTotals = `-- name: PaymentTotals :one

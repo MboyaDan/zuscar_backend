@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -34,7 +35,15 @@ func (h *Handler) Register(v1 *gin.RouterGroup, guard ...gin.HandlerFunc) {
 	o.POST("/:id/finalise", create, idempotency.Required(), h.finalise)
 
 	s := v1.Group("/sales", guard...)
+	s.GET("", requirePermission("sales.view"), h.listSales)
 	s.GET("/:id", requirePermission("sales.view"), h.getSale)
+	s.POST("/:id/payments", create, idempotency.Required(), h.addPayment)
+
+	pm := v1.Group("/payments", guard...)
+	pm.GET("", requirePermission("sales.view"), h.listPayments)
+	reconcile := requirePermission("payments.reconcile")
+	pm.POST("/:id/confirm", reconcile, idempotency.Required(), h.confirmPayment)
+	pm.POST("/:id/fail", reconcile, h.failPayment)
 }
 
 func requirePermission(permission string) gin.HandlerFunc {
@@ -142,6 +151,192 @@ func (h *Handler) getSale(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"sale": out})
+}
+
+// body decodes an optional JSON body, refusing unknown fields.
+func body(c *gin.Context, into any) bool {
+	if c.Request.ContentLength == 0 {
+		return true
+	}
+	dec := json.NewDecoder(c.Request.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(into); err != nil {
+		zhttp.WriteError(c, http.StatusBadRequest, "validation_failed", "The request body is not valid JSON.", zhttp.FieldError{Field: "body", Message: "invalid or unexpected JSON"})
+		return false
+	}
+	return true
+}
+
+func replay(c *gin.Context, st *idempotency.Stored) {
+	c.Header("Idempotent-Replay", "true")
+	c.Data(st.Status, "application/json; charset=utf-8", st.Body)
+}
+
+func (h *Handler) addPayment(c *gin.Context) {
+	id, ok := idParam(c, "sale")
+	if !ok {
+		return
+	}
+	var in struct {
+		Method      string `json:"method"`
+		AmountCents int64  `json:"amount_cents"`
+		Reference   string `json:"reference"`
+	}
+	if !body(c, &in) {
+		return
+	}
+	out, st, err := h.svc.AddPayment(c.Request.Context(), auth.From(c), id, service.PaymentInput{Method: in.Method, AmountCents: in.AmountCents, Reference: in.Reference}, idempotency.From(c), meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	if st != nil {
+		replay(c, st)
+		return
+	}
+	c.Header("Location", "/api/v1/sales/"+strconv.FormatInt(id, 10))
+	c.JSON(http.StatusCreated, out)
+}
+
+func (h *Handler) confirmPayment(c *gin.Context) {
+	id, ok := idParam(c, "payment")
+	if !ok {
+		return
+	}
+	var in struct {
+		Note string `json:"note"`
+	}
+	if !body(c, &in) {
+		return
+	}
+	out, st, err := h.svc.ConfirmPayment(c.Request.Context(), auth.From(c), id, in.Note, idempotency.From(c), meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	if st != nil {
+		replay(c, st)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"payment": out})
+}
+
+func (h *Handler) failPayment(c *gin.Context) {
+	id, ok := idParam(c, "payment")
+	if !ok {
+		return
+	}
+	var in struct {
+		Note string `json:"note"`
+	}
+	if !body(c, &in) {
+		return
+	}
+	out, err := h.svc.FailPayment(c.Request.Context(), auth.From(c), id, in.Note, meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"payment": out})
+}
+
+func queryInt(c *gin.Context, name string) (int64, bool) {
+	v := c.Query(name)
+	if v == "" {
+		return 0, true
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n < 0 {
+		zhttp.WriteError(c, http.StatusBadRequest, "validation_failed", "Some fields are invalid.", zhttp.FieldError{Field: name, Message: "must be a positive whole number"})
+		return 0, false
+	}
+	return n, true
+}
+
+func oneOf(c *gin.Context, name string, allowed ...string) (string, bool) {
+	v := c.Query(name)
+	if v == "" {
+		return "", true
+	}
+	for _, a := range allowed {
+		if v == a {
+			return v, true
+		}
+	}
+	zhttp.WriteError(c, http.StatusBadRequest, "validation_failed", "Some fields are invalid.", zhttp.FieldError{Field: name, Message: "is not a recognised value"})
+	return "", false
+}
+
+func (h *Handler) listPayments(c *gin.Context) {
+	var f service.PaymentFilter
+	var ok bool
+	if f.Status, ok = oneOf(c, "status", "pending_confirmation", "confirmed", "failed", "reversed"); !ok {
+		return
+	}
+	if f.Method, ok = oneOf(c, "method", "cash", "mpesa_manual", "card_manual", "bank_manual"); !ok {
+		return
+	}
+	if f.ShiftID, ok = queryInt(c, "shift_id"); !ok {
+		return
+	}
+	if f.SaleID, ok = queryInt(c, "sale_id"); !ok {
+		return
+	}
+	if f.BeforeID, ok = queryInt(c, "cursor"); !ok {
+		return
+	}
+	lim, ok := queryInt(c, "limit")
+	if !ok {
+		return
+	}
+	f.Limit = int(lim)
+	items, more, err := h.svc.ListPayments(c.Request.Context(), auth.From(c), f)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	res := gin.H{"payments": items}
+	if more {
+		res["next_cursor"] = strconv.FormatInt(items[len(items)-1].ID, 10)
+	}
+	c.JSON(http.StatusOK, res)
+}
+
+func (h *Handler) listSales(c *gin.Context) {
+	var f service.SaleFilter
+	var ok bool
+	if f.Status, ok = oneOf(c, "status", "finalised", "partially_refunded", "refunded", "voided"); !ok {
+		return
+	}
+	if f.PaymentStatus, ok = oneOf(c, "payment_status", "unpaid", "partially_paid", "paid", "charged_to_folio"); !ok {
+		return
+	}
+	if d := c.Query("business_date"); d != "" {
+		t, err := time.Parse("2006-01-02", d)
+		if err != nil {
+			zhttp.WriteError(c, http.StatusBadRequest, "validation_failed", "Some fields are invalid.", zhttp.FieldError{Field: "business_date", Message: "must be a date like 2026-10-19"})
+			return
+		}
+		f.BusinessDate = &t
+	}
+	if f.BeforeID, ok = queryInt(c, "cursor"); !ok {
+		return
+	}
+	lim, ok := queryInt(c, "limit")
+	if !ok {
+		return
+	}
+	f.Limit = int(lim)
+	items, more, err := h.svc.ListSales(c.Request.Context(), auth.From(c), f)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	res := gin.H{"sales": items}
+	if more {
+		res["next_cursor"] = strconv.FormatInt(items[len(items)-1].ID, 10)
+	}
+	c.JSON(http.StatusOK, res)
 }
 
 func (h *Handler) fail(c *gin.Context, err error) {
