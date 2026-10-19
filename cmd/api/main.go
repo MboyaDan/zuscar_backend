@@ -22,6 +22,8 @@ import (
 	"zuscar/backend/internal/platform/db"
 	zhttp "zuscar/backend/internal/platform/http"
 	"zuscar/backend/internal/platform/logging"
+	printhandler "zuscar/backend/internal/printing/handler"
+	printservice "zuscar/backend/internal/printing/service"
 	saleshandler "zuscar/backend/internal/sales/handler"
 	salesservice "zuscar/backend/internal/sales/service"
 	sethandler "zuscar/backend/internal/settings/handler"
@@ -69,7 +71,9 @@ func main() {
 			settings := setservice.New(pool, svc.Clock(), svc, svc.RecentReauth)
 			orders := orderservice.New(pool, svc)
 			orderhandler.New(orders, log).Register(v1, h.Authenticate(false), h.CSRF())
-			saleshandler.New(salesservice.New(pool, svc, orders, settings, settings), log).Register(v1, h.Authenticate(false), h.CSRF())
+			sales := salesservice.New(pool, svc, orders, settings, settings)
+			saleshandler.New(sales, log).Register(v1, h.Authenticate(false), h.CSRF())
+			printhandler.New(printservice.New(pool, svc, sales, orders, settings), log).Register(v1, h.Authenticate(false), h.CSRF())
 			return nil
 		}
 	} else {

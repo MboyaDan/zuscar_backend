@@ -1838,6 +1838,193 @@ paths:
         '404': *id001
         '409': *id001
         '422': *id001
+  /api/v1/print/documents/receipt/{id}:
+    get:
+      summary: Receipt data for a sale
+      description: 'Needs permission sales.view (the same scope rule as the sales list, S-47). Returns what a receipt shows, built from the stored sale; creates no job. Failed payments are left out. 404 for a sale the caller may not see.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {document: {type: object}}}
+        '401': *id001
+        '403': *id001
+        '404': *id001
+  /api/v1/print/documents/ticket/{id}:
+    get:
+      summary: Kitchen ticket data
+      description: 'Needs permission kitchen.view. Lines carry no prices on purpose.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {document: {type: object}}}
+        '401': *id001
+        '403': *id001
+        '404': *id001
+  /api/v1/print/documents/bill/{id}:
+    get:
+      summary: Unpaid bill data for an order
+      description: 'Needs permission sales.create. Same figures as GET /orders/{id}/bill, marked as a bill, not a receipt.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {document: {type: object}}}
+        '401': *id001
+        '403': *id001
+        '404': *id001
+  /api/v1/print/test-page:
+    get:
+      summary: Printer test page data
+      description: 'Any signed-in user. Used by docs/printer-test-sheet.md (AC-16, DG-03).'
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {document: {type: object}}}
+        '401': *id001
+  /api/v1/print/jobs:
+    post:
+      summary: Queue the first print of a document
+      description: 'Needs a signed-in user and the permission of the document type (receipt sales.view, kitchen_ticket kitchen.view, bill sales.create, test_page none). The sale, ticket or bill must already exist; this never changes it. The job keeps a frozen copy of the document. A receipt or kitchen ticket has exactly one original job: asking again returns that job with 200 and created=false, so a double tap or a retry cannot queue a second first copy. A bill or test page always makes a new job. The Idempotency-Key header is optional because nothing money-related is created, but a screen that retries should send one: the same key returns the first answer (Idempotent-Replayed: true), the same key with a different body returns 422 idempotency_key_reused.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: Idempotency-Key, in: header, required: false, schema: {type: string, minLength: 8, maxLength: 128}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [doc_type], properties: {doc_type: {type: string, enum: [receipt, kitchen_ticket, bill, test_page]}, ref_id: {type: integer, format: int64, description: 'sale id, ticket id or order id; omit for test_page'}}}
+      responses:
+        '200':
+          description: The existing original job
+          content:
+            application/json:
+              schema: {type: object, properties: {job: {type: object}, created: {type: boolean}}}
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {type: object, properties: {job: {type: object}, created: {type: boolean}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+        '422': *id001
+    get:
+      summary: List print jobs
+      description: 'Any signed-in user sees the jobs they created; Super Admin and Business Manager see all. Newest first; cursor is the id of the last row.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: status, in: query, schema: {type: string, enum: [queued, printed, failed, reprinted]}}
+      - {name: doc_type, in: query, schema: {type: string, enum: [receipt, kitchen_ticket, bill, test_page]}}
+      - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200}}
+      - {name: cursor, in: query, schema: {type: string}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {jobs: {type: array, items: {type: object}}, next_cursor: {type: string}}}
+        '400': *id001
+        '401': *id001
+  /api/v1/print/jobs/{id}:
+    get:
+      summary: One print job with its document and attempts
+      description: 'The creator or a manager; anyone else gets 404.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {job: {type: object}}}
+        '401': *id001
+        '404': *id001
+  /api/v1/print/jobs/{id}/attempts:
+    post:
+      summary: Record what happened at the printer
+      description: 'outcome printed or failed, with an optional note. Only a queued job takes a result (409 invalid_transition otherwise). printed is the person''s confirmation: a browser cannot prove paper came out (DG-03). A printed original becomes printed, a printed copy becomes reprinted, a failure becomes failed and the job is kept for a retry.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [outcome], properties: {outcome: {type: string, enum: [printed, failed]}, note: {type: string, maxLength: 200}}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {job: {type: object}}}
+        '400': *id001
+        '401': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/print/jobs/{id}/retry:
+    post:
+      summary: Put a failed print job back in the queue
+      description: 'The same job: no new record and no new number. 409 invalid_transition unless the job is failed.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {job: {type: object}}}
+        '401': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/print/jobs/{id}/reprint:
+    post:
+      summary: Print a copy of a job that already printed
+      description: 'Creates a new job linked to the first (reprint_of), numbered (copy_no), carrying the same frozen document, and writes an audit row. Needs sales.reprint for a receipt, kitchen.view for a ticket, sales.create for a bill. 409 not_printed unless the source printed. The sale and ticket are untouched. The frontend must show a REPRINT marker when is_reprint is true.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {type: object, properties: {job: {type: object}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
 components:
   securitySchemes:
     sessionCookie:

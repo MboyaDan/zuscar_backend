@@ -24,6 +24,8 @@ import (
 	orderservice "zuscar/backend/internal/orders/service"
 	zhttp "zuscar/backend/internal/platform/http"
 	"zuscar/backend/internal/platform/testdb"
+	printhandler "zuscar/backend/internal/printing/handler"
+	printservice "zuscar/backend/internal/printing/service"
 	"zuscar/backend/internal/provision"
 	saleshandler "zuscar/backend/internal/sales/handler"
 	salesservice "zuscar/backend/internal/sales/service"
@@ -114,7 +116,9 @@ func newEnv(t *testing.T, o ...envOpts) *testEnv {
 	orderSvc := orderservice.New(pool, svc)
 	orderhandler.New(orderSvc, log).Register(v1, h.Authenticate(false), h.CSRF())
 	setSvc := setservice.New(pool, clock, svc, svc.RecentReauth)
-	saleshandler.New(salesservice.New(pool, svc, orderSvc, setSvc, setSvc), log).Register(v1, h.Authenticate(false), h.CSRF())
+	salesSvc := salesservice.New(pool, svc, orderSvc, setSvc, setSvc)
+	saleshandler.New(salesSvc, log).Register(v1, h.Authenticate(false), h.CSRF())
+	printhandler.New(printservice.New(pool, svc, salesSvc, orderSvc, setSvc), log).Register(v1, h.Authenticate(false), h.CSRF())
 	// Probe routes stand in for ordinary protected endpoints that later stages add.
 	v1.GET("/_probe", h.Authenticate(false), func(c *gin.Context) { c.JSON(200, gin.H{"ok": true}) })
 	v1.GET("/_sensitive", h.Authenticate(false), h.RequireRecentReauth(), func(c *gin.Context) { c.JSON(200, gin.H{"ok": true}) })
