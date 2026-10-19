@@ -165,6 +165,19 @@ func (q *Queries) ListTaxRates(ctx context.Context) ([]ListTaxRatesRow, error) {
 	return items, nil
 }
 
+const nextDocumentNumber = `-- name: NextDocumentNumber :one
+UPDATE document_counters SET next_value = next_value + 1, updated_at = now()
+WHERE doc_type = $1 AND scope = '' RETURNING (next_value - 1)::bigint AS value
+`
+
+// A gapless document number: the row lock serialises callers and a rolled-back transaction gives the number back (A-05).
+func (q *Queries) NextDocumentNumber(ctx context.Context, docType string) (int64, error) {
+	row := q.db.QueryRow(ctx, nextDocumentNumber, docType)
+	var value int64
+	err := row.Scan(&value)
+	return value, err
+}
+
 const updateTaxRate = `-- name: UpdateTaxRate :exec
 UPDATE tax_rates SET name = $2, rate_bp = $3, active = $4 WHERE id = $1
 `

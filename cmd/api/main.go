@@ -22,6 +22,8 @@ import (
 	"zuscar/backend/internal/platform/db"
 	zhttp "zuscar/backend/internal/platform/http"
 	"zuscar/backend/internal/platform/logging"
+	saleshandler "zuscar/backend/internal/sales/handler"
+	salesservice "zuscar/backend/internal/sales/service"
 	sethandler "zuscar/backend/internal/settings/handler"
 	setservice "zuscar/backend/internal/settings/service"
 )
@@ -64,7 +66,10 @@ func main() {
 			h.RegisterAdmin(v1)
 			sethandler.New(setservice.New(pool, svc.Clock(), svc, svc.RecentReauth), log).Register(v1, h.Authenticate(false), h.CSRF())
 			cathandler.New(catservice.New(pool, svc), log).Register(v1, h.Authenticate(false), h.CSRF())
-			orderhandler.New(orderservice.New(pool, svc), log).Register(v1, h.Authenticate(false), h.CSRF())
+			settings := setservice.New(pool, svc.Clock(), svc, svc.RecentReauth)
+			orders := orderservice.New(pool, svc)
+			orderhandler.New(orders, log).Register(v1, h.Authenticate(false), h.CSRF())
+			saleshandler.New(salesservice.New(pool, svc, orders, settings, settings), log).Register(v1, h.Authenticate(false), h.CSRF())
 			return nil
 		}
 	} else {

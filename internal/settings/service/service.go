@@ -427,3 +427,10 @@ func (s *Service) UpdateTaxRate(ctx context.Context, actor *auth.Principal, id i
 	})
 	return out, err
 }
+
+// NextNumber returns the next gapless number for a document type (receipt, order and so on). It runs inside the
+// caller's transaction, so a rolled-back sale gives its number back and no gap appears (A-05). Other modules call
+// this instead of reading document_counters themselves.
+func (s *Service) NextNumber(ctx context.Context, tx pgx.Tx, docType string) (int64, error) {
+	return repository.New(tx).NextDocumentNumber(ctx, docType)
+}
