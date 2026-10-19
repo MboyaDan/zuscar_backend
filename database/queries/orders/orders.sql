@@ -97,3 +97,18 @@ UPDATE order_items SET qty = $2, note = $3 WHERE id = $1;
 
 -- name: CancelOrderItem :exec
 UPDATE order_items SET status = 'cancelled', cancel_reason = $2, cancelled_by = $3, cancelled_at = now() WHERE id = $1;
+
+-- Stage 11a: what the sales module needs from an order. Sales never reads these tables itself.
+-- name: ListSaleLines :many
+SELECT i.id, i.product_id, p.name AS product_name, c.module, i.qty, i.unit_price_cents,
+       COALESCE((SELECT sum(m.price_delta_cents) FROM order_item_modifiers m WHERE m.order_item_id = i.id), 0)::bigint AS modifiers_cents,
+       COALESCE((SELECT string_agg(mo.name, ', ' ORDER BY mo.name) FROM order_item_modifiers im JOIN modifiers mo ON mo.id = im.modifier_id WHERE im.order_item_id = i.id), '')::text AS modifiers_text,
+       t.code AS tax_code, t.treatment AS tax_treatment, t.rate_bp AS tax_rate_bp
+FROM order_items i
+JOIN products p ON p.id = i.product_id
+JOIN categories c ON c.id = p.category_id
+JOIN tax_rates t ON t.id = p.tax_rate_id
+WHERE i.order_id = $1 AND i.status = 'active' ORDER BY i.id;
+
+-- name: MarkOrderFinalised :exec
+UPDATE orders SET status = 'finalised', version = version + 1, updated_at = now() WHERE id = $1 AND status IN ('open', 'sent');

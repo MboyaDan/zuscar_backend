@@ -485,6 +485,65 @@ func (q *Queries) ListOrders(ctx context.Context, arg ListOrdersParams) ([]ListO
 	return items, nil
 }
 
+const listSaleLines = `-- name: ListSaleLines :many
+SELECT i.id, i.product_id, p.name AS product_name, c.module, i.qty, i.unit_price_cents,
+       COALESCE((SELECT sum(m.price_delta_cents) FROM order_item_modifiers m WHERE m.order_item_id = i.id), 0)::bigint AS modifiers_cents,
+       COALESCE((SELECT string_agg(mo.name, ', ' ORDER BY mo.name) FROM order_item_modifiers im JOIN modifiers mo ON mo.id = im.modifier_id WHERE im.order_item_id = i.id), '')::text AS modifiers_text,
+       t.code AS tax_code, t.treatment AS tax_treatment, t.rate_bp AS tax_rate_bp
+FROM order_items i
+JOIN products p ON p.id = i.product_id
+JOIN categories c ON c.id = p.category_id
+JOIN tax_rates t ON t.id = p.tax_rate_id
+WHERE i.order_id = $1 AND i.status = 'active' ORDER BY i.id
+`
+
+type ListSaleLinesRow struct {
+	ID             int64
+	ProductID      int64
+	ProductName    string
+	Module         string
+	Qty            int32
+	UnitPriceCents int64
+	ModifiersCents int64
+	ModifiersText  string
+	TaxCode        string
+	TaxTreatment   string
+	TaxRateBp      int32
+}
+
+// Stage 11a: what the sales module needs from an order. Sales never reads these tables itself.
+func (q *Queries) ListSaleLines(ctx context.Context, orderID int64) ([]ListSaleLinesRow, error) {
+	rows, err := q.db.Query(ctx, listSaleLines, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSaleLinesRow
+	for rows.Next() {
+		var i ListSaleLinesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProductID,
+			&i.ProductName,
+			&i.Module,
+			&i.Qty,
+			&i.UnitPriceCents,
+			&i.ModifiersCents,
+			&i.ModifiersText,
+			&i.TaxCode,
+			&i.TaxTreatment,
+			&i.TaxRateBp,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTables = `-- name: ListTables :many
 
 SELECT t.id, t.label, t.seats, t.active, t.created_at,
@@ -550,6 +609,15 @@ func (q *Queries) LockOrder(ctx context.Context, id int64) (LockOrderRow, error)
 		&i.OpenedBy,
 	)
 	return i, err
+}
+
+const markOrderFinalised = `-- name: MarkOrderFinalised :exec
+UPDATE orders SET status = 'finalised', version = version + 1, updated_at = now() WHERE id = $1 AND status IN ('open', 'sent')
+`
+
+func (q *Queries) MarkOrderFinalised(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, markOrderFinalised, id)
+	return err
 }
 
 const nextCounterValue = `-- name: NextCounterValue :one
