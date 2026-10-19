@@ -25,15 +25,6 @@ func errCode(w *httptest.ResponseRecorder) string {
 // and a signed-in caller without the permission (403 forbidden), for each of the nine default roles; a caller who
 // holds the permission is never turned away with "forbidden" (other answers such as 400 or reauth_required are fine).
 // The route list is read from the file, so a route added to the CSV without a guard fails here.
-// Stage 11b routes that are listed in routes.csv but not built yet. Delete this list when 11b lands.
-var pendingStage11b = map[string]bool{
-	"GET /api/v1/sales":                  true,
-	"POST /api/v1/sales/{id}/payments":   true,
-	"POST /api/v1/payments/{id}/confirm": true,
-	"POST /api/v1/payments/{id}/fail":    true,
-	"GET /api/v1/payments":               true,
-}
-
 func TestAC10_EveryProtectedRouteDeniesWithoutPermission(t *testing.T) {
 	f, err := os.Open("../../../docs/api/routes.csv")
 	if err != nil {
@@ -49,7 +40,7 @@ func TestAC10_EveryProtectedRouteDeniesWithoutPermission(t *testing.T) {
 	special := map[string]bool{"public": true, "terminal session": true, "system": true, "provider authenticity (unspecified)": true}
 	for _, r := range recs[1:] {
 		stage, _ := strconv.Atoi(r[4])
-		if stage > 11 || special[r[2]] || pendingStage11b[r[0]+" "+r[1]] {
+		if stage > 11 || special[r[2]] {
 			continue
 		}
 		// Stage 6 session routes (logout, change-password) would end the shared test session; their guards are
