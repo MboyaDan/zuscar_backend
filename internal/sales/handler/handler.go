@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -38,6 +39,9 @@ func (h *Handler) Register(v1 *gin.RouterGroup, guard ...gin.HandlerFunc) {
 	s.GET("", requirePermission("sales.view"), h.listSales)
 	s.GET("/:id", requirePermission("sales.view"), h.getSale)
 	s.POST("/:id/payments", create, idempotency.Required(), h.addPayment)
+	s.GET("/:id/refund-quote", requirePermission("sales.refund"), h.refundQuote)
+	s.POST("/:id/refunds", requirePermission("sales.refund"), idempotency.Required(), h.refund)
+	s.POST("/:id/void", requirePermission("sales.void"), idempotency.Required(), h.void)
 
 	sh := v1.Group("/shifts", guard...)
 	manage := requirePermission("shifts.manage")
@@ -206,6 +210,79 @@ func (h *Handler) addPayment(c *gin.Context) {
 	}
 	c.Header("Location", "/api/v1/sales/"+strconv.FormatInt(id, 10))
 	c.JSON(http.StatusCreated, out)
+}
+
+func (h *Handler) refund(c *gin.Context) {
+	id, ok := idParam(c, "sale")
+	if !ok {
+		return
+	}
+	var in service.RefundInput
+	if !body(c, &in) {
+		return
+	}
+	out, st, err := h.svc.Refund(c.Request.Context(), auth.From(c), id, in, idempotency.From(c), meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	if st != nil {
+		replay(c, st)
+		return
+	}
+	c.Header("Location", "/api/v1/sales/"+strconv.FormatInt(id, 10))
+	c.JSON(http.StatusCreated, out)
+}
+
+func (h *Handler) void(c *gin.Context) {
+	id, ok := idParam(c, "sale")
+	if !ok {
+		return
+	}
+	var in struct {
+		Reason string `json:"reason"`
+	}
+	if !body(c, &in) {
+		return
+	}
+	out, st, err := h.svc.Void(c.Request.Context(), auth.From(c), id, in.Reason, idempotency.From(c), meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	if st != nil {
+		replay(c, st)
+		return
+	}
+	c.Header("Location", "/api/v1/sales/"+strconv.FormatInt(id, 10))
+	c.JSON(http.StatusCreated, out)
+}
+
+// refundQuote answers "what would taking these lines back come to": ?lines=ITEM:QTY,ITEM:QTY
+func (h *Handler) refundQuote(c *gin.Context) {
+	id, ok := idParam(c, "sale")
+	if !ok {
+		return
+	}
+	var lines []service.RefundLineInput
+	if raw := strings.TrimSpace(c.Query("lines")); raw != "" {
+		for _, part := range strings.Split(raw, ",") {
+			a, b, found := strings.Cut(part, ":")
+			item, e1 := strconv.ParseInt(strings.TrimSpace(a), 10, 64)
+			qty, e2 := strconv.ParseInt(strings.TrimSpace(b), 10, 32)
+			if !found || e1 != nil || e2 != nil || item <= 0 || qty <= 0 {
+				zhttp.WriteError(c, http.StatusBadRequest, "validation_failed", "Some fields are invalid.", zhttp.FieldError{Field: "lines", Message: "use lines=ITEM:QTY,ITEM:QTY with whole numbers above 0"})
+				return
+			}
+			lines = append(lines, service.RefundLineInput{SaleItemID: item, Qty: int32(qty)})
+		}
+	}
+	out, err := h.svc.QuoteRefund(c.Request.Context(), auth.From(c), id, lines)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"quote": out})
 }
 
 func (h *Handler) confirmPayment(c *gin.Context) {

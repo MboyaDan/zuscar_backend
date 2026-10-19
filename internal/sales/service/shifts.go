@@ -79,7 +79,7 @@ type MovementView struct {
 type CashBreakdown struct {
 	OpeningFloatCents int64 `json:"opening_float_cents"`
 	CashSalesCents    int64 `json:"cash_payments_cents"` // confirmed cash payments
-	CashRefundsCents  int64 `json:"cash_refunds_cents"`  // Stage 15
+	CashRefundsCents  int64 `json:"cash_refunds_cents"`  // cash handed back from this drawer (Stage 15)
 	PaidInCents       int64 `json:"paid_in_cents"`
 	PaidOutCents      int64 `json:"paid_out_cents"`
 	ExpensesCents     int64 `json:"expenses_cents"`
@@ -120,7 +120,7 @@ func shiftFrom(id, uid int64, name, status string, opened pgtype.Timestamptz, fl
 }
 
 // cashBreakdown derives the expected cash from rows (AC-09): float + confirmed cash payments + paid-in - paid-out - expenses
-// (- cash refunds, once Stage 15 records them). Pending non-cash money is never part of it (AC-19).
+// - cash handed back for refunds and voids (Stage 15). Pending non-cash money is never part of it (AC-19).
 func cashBreakdown(ctx context.Context, q *repository.Queries, shiftID, float int64) (CashBreakdown, []PaymentTotal, error) {
 	b := CashBreakdown{OpeningFloatCents: float}
 	pays, err := q.ShiftPaymentTotals(ctx, pgtype.Int8{Int64: shiftID, Valid: true})
@@ -133,6 +133,9 @@ func cashBreakdown(ctx context.Context, q *repository.Queries, shiftID, float in
 		if p.Method == "cash" && p.Status == "confirmed" {
 			b.CashSalesCents += p.AmountCents
 		}
+	}
+	if b.CashRefundsCents, err = q.ShiftCashRefunds(ctx, pgtype.Int8{Int64: shiftID, Valid: true}); err != nil {
+		return b, nil, err
 	}
 	mv, err := q.ShiftMovementTotals(ctx, shiftID)
 	if err != nil {
@@ -274,11 +277,15 @@ func (s *Service) summary(ctx context.Context, q *repository.Queries, id int64) 
 	if err != nil {
 		return ShiftSummary{}, err
 	}
+	voided, err := q.ShiftVoidedCount(ctx, pgtype.Int8{Int64: id, Valid: true})
+	if err != nil {
+		return ShiftSummary{}, err
+	}
 	mv, err := q.ListCashMovements(ctx, id)
 	if err != nil {
 		return ShiftSummary{}, err
 	}
-	out := ShiftSummary{Shift: sh, Cash: b, Sales: map[string]any{"count": sc.Sales, "total_cents": sc.TotalCents}, Payments: []PaymentTotal{}, Pending: []PaymentTotal{}, Movements: []MovementView{}}
+	out := ShiftSummary{Shift: sh, Cash: b, Sales: map[string]any{"count": sc.Sales, "total_cents": sc.TotalCents, "voided": voided}, Payments: []PaymentTotal{}, Pending: []PaymentTotal{}, Movements: []MovementView{}}
 	for _, p := range all {
 		out.Payments = append(out.Payments, p)
 		if p.Method != "cash" && p.Status == "pending_confirmation" {

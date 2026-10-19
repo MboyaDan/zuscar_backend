@@ -47,7 +47,7 @@ stateDiagram-v2
   [*] --> pending_confirmation: manual M-Pesa, card or bank record
   pending_confirmation --> confirmed: confirmed against statement (A)
   pending_confirmation --> failed: not found or rejected (A)
-  confirmed --> reversed: refund or void compensating record (A)
+  confirmed --> reversed: provider reversal only (Stage 24); void and refund add records instead (S-63)
   failed --> [*]
   reversed --> [*]
 ```
@@ -56,7 +56,7 @@ stateDiagram-v2
 | create (cash) | sales.create | Confirmed at insert; adds to expected shift cash. Needs an open shift for the actor. |
 | create (M-Pesa, card, bank manual) | sales.create | Pending until a permitted user confirms (NN-11, AC-19). Typed reference never counts as collected. Duplicate (method, reference) rejected by partial unique index. |
 | to confirmed or failed | payments.reconcile | Actor, time and note recorded. Only pending payments qualify. |
-| to reversed | sales.refund or sales.void | Created by the refund or void service, never directly. |
+| to reversed | none yet | Reserved for provider reversals (Stage 24). A void or refund leaves the payment as it was and records the money handed back in `refund_payouts` (S-63). |
 Collections reports count confirmed payments only (AC-20). Amount, method and target never change after insert (S-10).
 
 ## 4. Sale
@@ -72,7 +72,7 @@ stateDiagram-v2
   voided --> [*]
 ```
 Finalisation, in one transaction (NN-04, brief 10.1): authenticate and authorise; load order and server prices; check discount permission and reason; check quantities and payment allocation; lock the receipt counter row FOR UPDATE; insert sale and immutable line snapshots with rate and tax; insert payments (cash confirmed, other manual pending) or leave a due balance, or post a folio charge instead (NN-10); insert stock movements for stock-tracked items; mark order finalised; write audit; commit; then respond. Idempotency (key, endpoint, request hash) wraps it. A rollback leaves no receipt number gap (A-05).
-Payment status (separate column, S-08): unpaid, partially_paid, paid, charged_to_folio. Void and refund each create compensating payment and stock records plus a refund or void row; the original sale and lines are never edited.
+Payment status (separate column, S-08): unpaid, partially_paid, paid, charged_to_folio. Void and refund each add a refund row (kind refund or void) with the lines taken back and the money handed back by method; stock is put back once inventory exists (Stage 17). The original sale, lines and payments are never edited.
 
 ## 5. Reservation
 ```mermaid

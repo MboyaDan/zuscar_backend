@@ -128,6 +128,7 @@ type SaleItemView struct {
 	TaxRateBP      int32  `json:"tax_rate_bp"`
 	TaxCents       int64  `json:"tax_cents"`
 	LineTotalCents int64  `json:"line_total_cents"`
+	RefundedQty    int32  `json:"refunded_qty"` // how many of this line have been taken back (Stage 15)
 }
 
 type PaymentView struct {
@@ -165,6 +166,9 @@ type SaleView struct {
 	CreatedAt     time.Time      `json:"created_at"`
 	Items         []SaleItemView `json:"items"`
 	Payments      []PaymentView  `json:"payments"`
+	RefundedCents int64          `json:"refunded_cents"` // money handed back so far (refunds and voids)
+	Refunds       []RefundView   `json:"refunds"`
+	Voidable      bool           `json:"voidable"` // finalised, no refund yet, and still the day it was made (S-18); set when a sale is read on its own
 }
 
 func (s *Service) load(ctx context.Context, q *repository.Queries, id int64) (SaleView, error) {
@@ -187,10 +191,24 @@ func (s *Service) load(ctx context.Context, q *repository.Queries, id int64) (Sa
 	if err != nil {
 		return SaleView{}, err
 	}
+	refs, err := s.refundsFor(ctx, q, id)
+	if err != nil {
+		return SaleView{}, err
+	}
+	pr, err := q.RefundedQtyBySaleItem(ctx, id)
+	if err != nil {
+		return SaleView{}, err
+	}
+	prior := priorByItem(pr)
 	v := SaleView{ID: h.ID, ReceiptNo: h.ReceiptNo, OrderNo: h.OrderNo, BusinessDate: h.BusinessDate.Time.Format("2006-01-02"), SubtotalCents: h.SubtotalCents,
 		DiscountCents: h.DiscountCents, TaxCents: h.TaxCents, TotalCents: h.TotalCents, PaidCents: tot.ConfirmedCents, PendingCents: tot.PendingCents,
 		BalanceCents: h.TotalCents - tot.ConfirmedCents, Status: h.Status, PaymentStatus: h.PaymentStatus, Source: h.Source, CashierID: h.CashierID,
-		CashierName: h.CashierName, TaxStatus: h.TaxStatus, CreatedAt: h.CreatedAt.Time, Items: []SaleItemView{}, Payments: []PaymentView{}}
+		CashierName: h.CashierName, TaxStatus: h.TaxStatus, CreatedAt: h.CreatedAt.Time, Items: []SaleItemView{}, Payments: []PaymentView{}, Refunds: refs}
+	for _, r := range refs {
+		for _, p := range r.Payouts {
+			v.RefundedCents += p.AmountCents
+		}
+	}
 	if h.OrderID != 0 {
 		o := h.OrderID
 		v.OrderID = &o
@@ -203,7 +221,7 @@ func (s *Service) load(ctx context.Context, q *repository.Queries, id int64) (Sa
 	for _, i := range items {
 		v.Items = append(v.Items, SaleItemView{ID: i.ID, ProductID: i.ProductID, Name: i.NameSnapshot, Module: i.Module, Qty: i.Qty, UnitPriceCents: i.UnitPriceCents,
 			ModifiersText: i.ModifiersText, ModifiersCents: i.ModifiersCents, DiscountCents: i.DiscountCents, DiscountReason: i.DiscountReason, TaxCode: i.TaxCode,
-			TaxTreatment: i.TaxTreatment, TaxRateBP: i.TaxRateBp, TaxCents: i.TaxCents, LineTotalCents: i.LineTotalCents})
+			TaxTreatment: i.TaxTreatment, TaxRateBP: i.TaxRateBp, TaxCents: i.TaxCents, LineTotalCents: i.LineTotalCents, RefundedQty: prior[i.ID].qty})
 	}
 	for _, p := range pays {
 		pv := PaymentView{ID: p.ID, Method: p.Method, Status: p.Status, AmountCents: p.AmountCents, Reference: p.Reference, CreatedBy: p.CreatedBy, CreatedAt: p.CreatedAt.Time}
@@ -568,6 +586,11 @@ func (s *Service) GetSale(ctx context.Context, actor *auth.Principal, id int64) 
 	}
 	if !seesAllSales(actor) && v.CashierID != actor.UserID && (v.WaiterID == nil || *v.WaiterID != actor.UserID) {
 		return SaleView{}, &NotFoundError{What: "sale"}
+	}
+	if v.Status == "finalised" && len(v.Refunds) == 0 {
+		if day, derr := s.businessDay(ctx, actor); derr == nil && v.BusinessDate == day.Format("2006-01-02") {
+			v.Voidable = true
+		}
 	}
 	return v, nil
 }

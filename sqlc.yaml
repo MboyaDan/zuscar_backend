@@ -24,7 +24,7 @@ sql:
       go: { package: repository, out: internal/orders/repository, sql_package: pgx/v5 }
   - engine: postgresql
     queries: database/queries/sales
-    schema: [database/migrations/0002_identity.sql, database/migrations/0004_settings.sql, database/migrations/0005_tax_treatment.sql, database/migrations/0008_catalogue.sql, database/migrations/0009_tables_orders.sql, database/migrations/0010_kitchen_tickets.sql, database/migrations/0012_sales.sql, database/migrations/0014_shifts.sql]
+    schema: [database/migrations/0002_identity.sql, database/migrations/0004_settings.sql, database/migrations/0005_tax_treatment.sql, database/migrations/0008_catalogue.sql, database/migrations/0009_tables_orders.sql, database/migrations/0010_kitchen_tickets.sql, database/migrations/0012_sales.sql, database/migrations/0014_shifts.sql, database/migrations/0016_refunds.sql]
     gen:
       go: { package: repository, out: internal/sales/repository, sql_package: pgx/v5 }
   - engine: postgresql

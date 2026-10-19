@@ -1614,6 +1614,78 @@ paths:
         '404': *id001
         '409': *id001
         '422': *id001
+  /api/v1/sales/{id}/void:
+    post:
+      summary: Void a sale
+      description: 'Needs permission sales.void and the Idempotency-Key header. For a sale that should never have happened (S-18): only while finalised, only the whole sale, only on the business date it was made, only while it has no refund. Needs a reason (1 to 200 characters). Adds a refund row of kind void listing every line and hands back the confirmed money by the methods it came in by; cash needs the caller to have an open shift (409 shift_required) and leaves that drawer. The sale and its payments are not edited and the receipt number is kept. Errors 409: sale_already_voided, void_after_refund, void_window_closed, pending_payments (confirm or fail them first), shift_required, refund_unsupported (charged to a folio), idempotency_conflict; 422 idempotency_key_reused. A replay returns the stored answer with Idempotent-Replayed: true.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 128}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [reason], properties: {reason: {type: string, minLength: 1, maxLength: 200}}}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {type: object, properties: {sale: {$ref: '#/components/schemas/Sale'}, refund: {$ref: '#/components/schemas/Refund'}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+        '422': *id001
+  /api/v1/sales/{id}/refunds:
+    post:
+      summary: Refund lines of a sale
+      description: 'Needs permission sales.refund and the Idempotency-Key header. Any business day. Needs a reason (1 to 200 characters), at least one line with a quantity, and payouts (one per method) that add up to the refund. The sale is locked first, so refunds racing for the same line are decided one after the other. A line can be taken back in pieces; the pieces add up to exactly the line. A payout by a method may not pass the confirmed money received by that method less what was already returned (409 payout_exceeds_received). Cash needs the caller to have an open shift (409 shift_required) and leaves that drawer. Status becomes partially_refunded, then refunded when every line is back. Errors 409: sale_not_refundable (voided or fully refunded), refund_exceeds_sold, payout_exceeds_received, shift_required, refund_unsupported, idempotency_conflict; 422 idempotency_key_reused. A replay returns the stored answer with Idempotent-Replayed: true.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 128}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [reason, lines, payouts], properties: {reason: {type: string, minLength: 1, maxLength: 200}, lines: {type: array, items: {type: object, required: [sale_item_id, qty], properties: {sale_item_id: {type: integer, format: int64}, qty: {type: integer, minimum: 1}}}}, payouts: {type: array, items: {type: object, required: [method, amount_cents], properties: {method: {type: string, enum: [cash, mpesa_manual, card_manual, bank_manual]}, amount_cents: {type: integer, format: int64}, reference: {type: string, maxLength: 64}}}}}}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {type: object, properties: {sale: {$ref: '#/components/schemas/Sale'}, refund: {$ref: '#/components/schemas/Refund'}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+        '422': *id001
+  /api/v1/sales/{id}/refund-quote:
+    get:
+      summary: What taking these lines back comes to
+      description: 'Needs permission sales.refund. Writes nothing. lines=ITEM:QTY,ITEM:QTY. Returns the amount and tax of the refund worked out by the server, the amount per line, and how much each method can still return (confirmed money received by that method less what was already returned). 409 refund_exceeds_sold when more is asked for than is left on a line.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      - {name: lines, in: query, required: true, schema: {type: string, example: '12:1,13:2'}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {quote: {type: object, properties: {amount_cents: {type: integer, format: int64}, tax_cents: {type: integer, format: int64}, lines: {type: array, items: {type: object}}, methods: {type: array, items: {type: object, properties: {method: {type: string}, returnable_cents: {type: integer, format: int64}}}}}}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
   /api/v1/payments:
     get:
       summary: List payments
@@ -1905,7 +1977,7 @@ paths:
   /api/v1/print/jobs:
     post:
       summary: Queue the first print of a document
-      description: 'Needs a signed-in user and the permission of the document type (receipt sales.view, kitchen_ticket kitchen.view, bill sales.create, test_page none). The sale, ticket or bill must already exist; this never changes it. The job keeps a frozen copy of the document. A receipt or kitchen ticket has exactly one original job: asking again returns that job with 200 and created=false, so a double tap or a retry cannot queue a second first copy. A bill or test page always makes a new job. The Idempotency-Key header is optional because nothing money-related is created, but a screen that retries should send one: the same key returns the first answer (Idempotent-Replayed: true), the same key with a different body returns 422 idempotency_key_reused.'
+      description: 'Needs a signed-in user and the permission of the document type (receipt sales.view, kitchen_ticket kitchen.view, bill sales.create, test_page none). The sale, ticket or bill must already exist; this never changes it. A voided sale's receipt gets 409 sale_voided. The job keeps a frozen copy of the document. A receipt or kitchen ticket has exactly one original job: asking again returns that job with 200 and created=false, so a double tap or a retry cannot queue a second first copy. A bill or test page always makes a new job. The Idempotency-Key header is optional because nothing money-related is created, but a screen that retries should send one: the same key returns the first answer (Idempotent-Replayed: true), the same key with a different body returns 422 idempotency_key_reused.'
       security:
       - sessionCookie: []
       parameters:
@@ -2009,7 +2081,7 @@ paths:
   /api/v1/print/jobs/{id}/reprint:
     post:
       summary: Print a copy of a job that already printed
-      description: 'Creates a new job linked to the first (reprint_of), numbered (copy_no), carrying the same frozen document, and writes an audit row. Needs sales.reprint for a receipt, kitchen.view for a ticket, sales.create for a bill. 409 not_printed unless the source printed. The sale and ticket are untouched. The frontend must show a REPRINT marker when is_reprint is true.'
+      description: 'Creates a new job linked to the first (reprint_of), numbered (copy_no), carrying the same frozen document, and writes an audit row. Needs sales.reprint for a receipt, kitchen.view for a ticket, sales.create for a bill. 409 not_printed unless the source printed. 409 sale_voided for the receipt of a voided sale. The sale and ticket are untouched. The frontend must show a REPRINT marker when is_reprint is true.'
       security:
       - sessionCookie: []
       parameters:
@@ -2065,8 +2137,28 @@ components:
         cashier_id: {type: integer, format: int64}
         cashier_name: {type: string}
         shift_id: {type: integer, format: int64, nullable: true}
-        items: {type: array, items: {type: object}}
+        items: {type: array, items: {type: object}, description: 'each line also carries refunded_qty, how many have been taken back'}
         payments: {type: array, items: {type: object}}
+        refunded_cents: {type: integer, format: int64, description: 'money handed back so far, refunds and voids'}
+        refunds: {type: array, items: {$ref: '#/components/schemas/Refund'}}
+        voidable: {type: boolean, description: 'set when the sale is read on its own: finalised, no refund yet, and still the business date it was made (S-18)'}
+    Refund:
+      type: object
+      properties:
+        id: {type: integer, format: int64}
+        refund_no: {type: integer, format: int64}
+        kind: {type: string, enum: [refund, void]}
+        reason: {type: string}
+        approved_by: {type: integer, format: int64}
+        approved_by_name: {type: string}
+        created_by: {type: integer, format: int64}
+        created_by_name: {type: string}
+        business_date: {type: string, format: date}
+        amount_cents: {type: integer, format: int64, description: 'value of the lines taken back, tax included'}
+        tax_cents: {type: integer, format: int64}
+        created_at: {type: string, format: date-time}
+        items: {type: array, items: {type: object, properties: {sale_item_id: {type: integer, format: int64}, name: {type: string}, qty: {type: integer}, amount_cents: {type: integer, format: int64}, tax_cents: {type: integer, format: int64}}}}
+        payouts: {type: array, items: {type: object, properties: {method: {type: string, enum: [cash, mpesa_manual, card_manual, bank_manual]}, amount_cents: {type: integer, format: int64}, reference: {type: string}, shift_id: {type: integer, format: int64, nullable: true}}}}
     DiningTable:
       type: object
       properties:
