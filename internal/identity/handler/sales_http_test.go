@@ -59,6 +59,7 @@ func TestAC01_FinaliseSnapshotsCorrect(t *testing.T) {
 	}
 	mj, tj, wa, wb, kj, bj := e.mustLogin("mgr"), e.mustLogin("till"), e.mustLogin("waitera"), e.mustLogin("waiterb"), e.mustLogin("cook"), e.mustLogin("barman")
 	tea, steak, extra := menuFixture(t, e, mj)
+	e.openShift(t, tj, 0)
 
 	var standard, zero int64
 	for _, r := range e.taxRates(mj) {
@@ -356,6 +357,7 @@ type liteSales struct {
 	e        *testEnv
 	till, wa jar
 	tea      int64
+	shift    int64
 }
 
 func newLiteSales(t *testing.T) *liteSales {
@@ -366,7 +368,21 @@ func newLiteSales(t *testing.T) *liteSales {
 	e.addUser("waitera", false, "waiter")
 	mj := e.mustLogin("mgr")
 	tea, _, _ := menuFixture(t, e, mj)
-	return &liteSales{e: e, till: e.mustLogin("till"), wa: e.mustLogin("waitera"), tea: tea}
+	l := &liteSales{e: e, till: e.mustLogin("till"), wa: e.mustLogin("waitera"), tea: tea}
+	l.shift = e.openShift(t, l.till, 0) // cash needs an open shift
+	return l
+}
+
+// openShift opens a shift for the signed-in user and returns its id.
+func (e *testEnv) openShift(t *testing.T, j jar, float int64) int64 {
+	t.Helper()
+	w := e.do(req{method: "POST", path: "/api/v1/shifts/open", jar: j, header: map[string]string{"Idempotency-Key": "open-" + itoa(int64(e.rows(`SELECT count(*) FROM cashier_shifts`)+1)) + "-aaaa"}, body: map[string]any{"opening_float_cents": float}})
+	expect(t, w, 201, "")
+	return decodeInto[struct {
+		Shift struct {
+			ID int64 `json:"id"`
+		} `json:"shift"`
+	}](t, w).Shift.ID
 }
 
 func (l *liteSales) order(t *testing.T) int64 {

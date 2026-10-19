@@ -1,8 +1,8 @@
 -- Stage 11a: sales and payments. Money is BIGINT cents.
 
 -- name: InsertSale :one
-INSERT INTO sales (receipt_no, order_id, business_date, subtotal_cents, discount_cents, tax_cents, total_cents, payment_status, cashier_id, waiter_id, tax_status)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id;
+INSERT INTO sales (receipt_no, order_id, business_date, subtotal_cents, discount_cents, tax_cents, total_cents, payment_status, cashier_id, waiter_id, tax_status, shift_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id;
 
 -- name: InsertSaleItem :exec
 INSERT INTO sale_items (sale_id, order_item_id, product_id, name_snapshot, module, qty, unit_price_cents, modifiers_text, modifiers_cents,
@@ -10,8 +10,8 @@ INSERT INTO sale_items (sale_id, order_item_id, product_id, name_snapshot, modul
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17);
 
 -- name: InsertPayment :one
-INSERT INTO payments (sale_id, purpose, method, status, amount_cents, reference, created_by, confirmed_by, confirmed_at, note)
-VALUES ($1, 'sale_payment', $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id;
+INSERT INTO payments (sale_id, purpose, method, status, amount_cents, reference, created_by, confirmed_by, confirmed_at, note, shift_id)
+VALUES ($1, 'sale_payment', $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id;
 
 -- name: SetSalePaymentStatus :exec
 UPDATE sales SET payment_status = $2, updated_at = now() WHERE id = $1;
@@ -24,7 +24,7 @@ FROM payments WHERE sale_id = $1;
 -- name: GetSaleHead :one
 SELECT s.id, s.receipt_no, COALESCE(s.order_id, 0)::bigint AS order_id, COALESCE(o.order_no, 0)::bigint AS order_no, s.business_date, s.subtotal_cents, s.discount_cents,
        s.tax_cents, s.total_cents, s.status, s.payment_status, s.source, s.cashier_id, cu.display_name AS cashier_name, COALESCE(s.waiter_id, 0)::bigint AS waiter_id,
-       s.tax_status, s.created_at, s.updated_at
+       s.tax_status, s.created_at, s.updated_at, COALESCE(s.shift_id, 0)::bigint AS shift_id
 FROM sales s
 JOIN users cu ON cu.id = s.cashier_id
 LEFT JOIN orders o ON o.id = s.order_id

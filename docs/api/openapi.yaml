@@ -1527,7 +1527,7 @@ paths:
   /api/v1/orders/{id}/finalise:
     post:
       summary: Finalise an order into a sale
-      description: 'Needs permission sales.create and the Idempotency-Key header. One transaction: claims the key, locks the order, takes the next gapless receipt number, writes the sale, immutable line snapshots and payments, and closes the order. Prices and totals are never taken from the request. Cash is confirmed at once; mpesa_manual, card_manual and bank_manual are recorded as pending_confirmation and need a reference. Payments may not add up to more than the total (400); an unpaid or partly paid sale keeps a due balance. Discounts need sales.discount, a reason and an existing line (403 discount_not_permitted). A role limited to bar products gets 403 bar_only. Errors 409: order_already_finalised, order_closed, order_empty, order_changed, duplicate_reference, tax_exclusive_unsupported, idempotency_conflict; 422 idempotency_key_reused. A replay returns the stored answer with Idempotent-Replay: true.'
+      description: 'Needs permission sales.create and the Idempotency-Key header. One transaction: claims the key, locks the order, takes the next gapless receipt number, writes the sale, immutable line snapshots and payments, and closes the order. Prices and totals are never taken from the request. Cash is confirmed at once; mpesa_manual, card_manual and bank_manual are recorded as pending_confirmation and need a reference. Payments may not add up to more than the total (400); an unpaid or partly paid sale keeps a due balance. Discounts need sales.discount, a reason and an existing line (403 discount_not_permitted). A role limited to bar products gets 403 bar_only. Cash needs an open shift for the caller (409 shift_required); the sale and its payments carry that shift. Errors 409: order_already_finalised, order_closed, order_empty, order_changed, duplicate_reference, tax_exclusive_unsupported, idempotency_conflict; 422 idempotency_key_reused. A replay returns the stored answer with Idempotent-Replay: true.'
       security:
       - sessionCookie: []
       parameters:
@@ -1591,7 +1591,7 @@ paths:
   /api/v1/sales/{id}/payments:
     post:
       summary: Add a payment to a finalised sale
-      description: 'Needs permission sales.create and the Idempotency-Key header. Locks the sale, so two payments racing for the last of the balance are decided one after the other. Cash is confirmed at once; mpesa_manual, card_manual and bank_manual are pending_confirmation until payments.reconcile confirms them and need a reference. Confirmed plus pending plus this amount may not exceed the total (400). Errors 409: sale_not_payable (voided, refunded, paid or charged to a folio), duplicate_reference, idempotency_conflict; 422 idempotency_key_reused. A replay returns the stored answer with Idempotent-Replay: true.'
+      description: 'Needs permission sales.create and the Idempotency-Key header. Locks the sale, so two payments racing for the last of the balance are decided one after the other. Cash is confirmed at once; mpesa_manual, card_manual and bank_manual are pending_confirmation until payments.reconcile confirms them and need a reference. Confirmed plus pending plus this amount may not exceed the total (400). Cash needs an open shift for the caller (409 shift_required). Errors 409: sale_not_payable (voided, refunded, paid or charged to a folio), duplicate_reference, idempotency_conflict; 422 idempotency_key_reused. A replay returns the stored answer with Idempotent-Replay: true.'
       security:
       - sessionCookie: []
       parameters:
@@ -1686,6 +1686,158 @@ paths:
         '403': *id001
         '404': *id001
         '409': *id001
+  /api/v1/shifts/open:
+    post:
+      summary: Open a shift
+      description: 'Needs permission shifts.manage and the Idempotency-Key header. Records the opening float. One open shift per person (409 shift_already_open). Cash can only be taken on an open shift.'
+      security:
+      - sessionCookie: []
+      - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 128}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [opening_float_cents], properties: {opening_float_cents: {type: integer, format: int64, minimum: 0}, notes: {type: string, maxLength: 500}}}
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {shift: {type: object}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '409': *id001
+        '422': *id001
+  /api/v1/shifts/current:
+    get:
+      summary: Open shift of the caller, with its summary
+      description: 'Needs permission shifts.manage. summary is null when no shift is open.'
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {summary: {type: object, nullable: true}}}
+        '401': *id001
+        '403': *id001
+  /api/v1/shifts:
+    get:
+      summary: List shifts
+      description: 'Needs permission shifts.close. A Business Manager or Super Admin sees every shift; any other role sees its own (S-55). Newest first, limit and cursor as for sales.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: status, in: query, schema: {type: string, enum: [open, closed, reconciled]}}
+      - {name: user_id, in: query, schema: {type: integer, format: int64}}
+      - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200}}
+      - {name: cursor, in: query, schema: {type: string}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {shifts: {type: array, items: {type: object}}, next_cursor: {type: string}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+  /api/v1/shifts/{id}/summary:
+    get:
+      summary: Shift summary and expected cash
+      description: 'Needs permission shifts.manage; the shift of another person answers 404 unless the caller is a manager. Expected cash = opening float + confirmed cash payments - cash refunds + paid-in - paid-out - expenses, derived from rows. An open shift stores no expected figure; a closed shift shows the snapshot it was closed with and its variance. Payments awaiting confirmation (not cash) are listed in pending_not_cash.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {summary: {type: object}}}
+        '401': *id001
+        '403': *id001
+        '404': *id001
+  /api/v1/shifts/{id}/cash-movements:
+    post:
+      summary: Record paid-in, paid-out or an expense
+      description: 'Needs permission shifts.manage and the Idempotency-Key header. Amount above 0 and a reason of 1 to 200 characters. Only an open shift (409 shift_closed). Movements are immutable.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 128}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [kind, amount_cents, reason], properties: {kind: {type: string, enum: [paid_in, paid_out, expense]}, amount_cents: {type: integer, format: int64}, reason: {type: string, maxLength: 200}}}
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {movement: {type: object}, expected_cash_cents: {type: integer, format: int64}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+        '422': *id001
+  /api/v1/shifts/{id}/close:
+    post:
+      summary: Close a shift
+      description: 'Needs permission shifts.close and the Idempotency-Key header. declared_cash_cents (the counted drawer) is required. The shift row is locked, the expected cash is snapshotted and variance = declared - expected is stored, never absorbed. Pending non-cash payments do not block the close (S-21). 409 invalid_transition when not open. Answers with the shift summary.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 128}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [declared_cash_cents], properties: {declared_cash_cents: {type: integer, format: int64, minimum: 0}, notes: {type: string, maxLength: 500}}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+        '422': *id001
+  /api/v1/shifts/{id}/reconcile:
+    post:
+      summary: Reconcile a closed shift
+      description: 'Needs permission payments.reconcile and the Idempotency-Key header. Only a closed shift (409 invalid_transition). Records who and when.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 128}}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {type: object, properties: {note: {type: string, maxLength: 500}}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {shift: {type: object}}}
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+        '422': *id001
 components:
   securitySchemes:
     sessionCookie:
@@ -1725,6 +1877,7 @@ components:
         tax_status: {type: string, enum: [provisional_unverified, verified]}
         cashier_id: {type: integer, format: int64}
         cashier_name: {type: string}
+        shift_id: {type: integer, format: int64, nullable: true}
         items: {type: array, items: {type: object}}
         payments: {type: array, items: {type: object}}
     DiningTable:

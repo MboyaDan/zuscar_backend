@@ -144,6 +144,10 @@ func (s *Service) AddPayment(ctx context.Context, actor *auth.Principal, saleID 
 		if tot.ConfirmedCents+tot.PendingCents+p.AmountCents > sale.TotalCents {
 			return &ValidationError{Field: "amount_cents", Msg: "is more than the balance still to pay"}
 		}
+		shift, err := s.shiftFor(ctx, q, actor, p.Method == "cash")
+		if err != nil {
+			return err
+		}
 		status, by, at := "pending_confirmation", pgtype.Int8{}, pgtype.Timestamptz{}
 		if p.Method == "cash" {
 			status, by, at = "confirmed", pgtype.Int8{Int64: actor.UserID, Valid: true}, pgtype.Timestamptz{Time: s.now(), Valid: true}
@@ -153,7 +157,7 @@ func (s *Service) AddPayment(ctx context.Context, actor *auth.Principal, saleID 
 			ref = pgtype.Text{String: p.Reference, Valid: true}
 		}
 		pid, err := q.InsertPayment(ctx, repository.InsertPaymentParams{SaleID: pgtype.Int8{Int64: saleID, Valid: true}, Method: p.Method, Status: status,
-			AmountCents: p.AmountCents, Reference: ref, CreatedBy: actor.UserID, ConfirmedBy: by, ConfirmedAt: at})
+			AmountCents: p.AmountCents, Reference: ref, CreatedBy: actor.UserID, ConfirmedBy: by, ConfirmedAt: at, ShiftID: shift})
 		if isUniqueRef(err) {
 			return &ConflictError{Code: "duplicate_reference", Field: "reference", Msg: "that " + p.Method + " reference was already recorded"}
 		}

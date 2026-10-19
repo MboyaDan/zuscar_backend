@@ -26,6 +26,32 @@ type AuditLog struct {
 	Ip          *netip.Addr
 }
 
+type CashMovement struct {
+	ID          int64
+	ShiftID     int64
+	Kind        string
+	AmountCents int64
+	Reason      string
+	CreatedBy   int64
+	CreatedAt   pgtype.Timestamptz
+}
+
+type CashierShift struct {
+	ID                int64
+	UserID            int64
+	Status            string
+	OpenedAt          pgtype.Timestamptz
+	OpeningFloatCents int64
+	ClosedAt          pgtype.Timestamptz
+	ClosedBy          pgtype.Int8
+	DeclaredCashCents pgtype.Int8
+	ExpectedCashCents pgtype.Int8
+	VarianceCents     pgtype.Int8
+	ReconciledAt      pgtype.Timestamptz
+	ReconciledBy      pgtype.Int8
+	Notes             string
+}
+
 type Category struct {
 	ID        int64
 	Module    string
