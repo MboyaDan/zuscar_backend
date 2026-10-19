@@ -208,6 +208,39 @@ type ProductModifier struct {
 	ModifierID int64
 }
 
+type Refund struct {
+	ID           int64
+	RefundNo     int64
+	SaleID       int64
+	Kind         string
+	Reason       string
+	ApprovedBy   int64
+	CreatedBy    int64
+	BusinessDate pgtype.Date
+	AmountCents  int64
+	TaxCents     int64
+	CreatedAt    pgtype.Timestamptz
+}
+
+type RefundItem struct {
+	ID          int64
+	RefundID    int64
+	SaleItemID  int64
+	Qty         int32
+	AmountCents int64
+	TaxCents    int64
+}
+
+type RefundPayout struct {
+	ID          int64
+	RefundID    int64
+	Method      string
+	AmountCents int64
+	Reference   pgtype.Text
+	ShiftID     pgtype.Int8
+	CreatedAt   pgtype.Timestamptz
+}
+
 type Role struct {
 	ID          int64
 	Code        string

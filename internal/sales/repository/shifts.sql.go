@@ -377,7 +377,7 @@ func (q *Queries) ShiftPaymentTotals(ctx context.Context, shiftID pgtype.Int8) (
 }
 
 const shiftSaleCount = `-- name: ShiftSaleCount :one
-SELECT count(*)::bigint AS sales, COALESCE(sum(total_cents), 0)::bigint AS total_cents FROM sales WHERE shift_id = $1
+SELECT count(*)::bigint AS sales, COALESCE(sum(total_cents), 0)::bigint AS total_cents FROM sales WHERE shift_id = $1 AND status <> 'voided'
 `
 
 type ShiftSaleCountRow struct {

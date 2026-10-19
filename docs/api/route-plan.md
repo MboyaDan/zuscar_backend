@@ -120,8 +120,9 @@ Design only: no route exists yet. The machine-readable source is `docs/api/route
 | POST | `/api/v1/print/jobs/{id}/reprint` | sales.reprint | - | 14 | new job, REPRINT marker; tickets need kitchen.view |
 | GET | `/api/v1/print/jobs` | authenticated | - | 14 |  |
 | GET | `/api/v1/print/test-page` | authenticated | - | 14 | AC-16, DG-03 |
-| POST | `/api/v1/sales/{id}/void` | sales.void | Y | 15 | reason, compensating records |
-| POST | `/api/v1/sales/{id}/refunds` | sales.refund | Y | 15 | reason, approver, compensating records |
+| POST | `/api/v1/sales/{id}/void` | sales.void | Y | 15 | reason; whole sale, same business date, no refund yet; money goes back by the methods it came in by |
+| POST | `/api/v1/sales/{id}/refunds` | sales.refund | Y | 15 | reason, lines and payouts; any day; compensating records |
+| GET | `/api/v1/sales/{id}/refund-quote` | sales.refund | - | 15 | server-side sums for the chosen lines; writes nothing |
 | POST | `/api/v1/reconciliation/manual-receipts` | payments.reconcile | Y | 16 | duplicate guard on manual receipt number |
 | GET | `/api/v1/reconciliation/manual-receipts` | payments.reconcile | - | 16 |  |
 | GET | `/api/v1/inventory/items` | inventory.view | - | 17 |  |

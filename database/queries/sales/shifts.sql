@@ -40,7 +40,7 @@ SELECT kind, count(*)::bigint AS movements, COALESCE(sum(amount_cents), 0)::bigi
 FROM cash_movements WHERE shift_id = $1 GROUP BY kind;
 
 -- name: ShiftSaleCount :one
-SELECT count(*)::bigint AS sales, COALESCE(sum(total_cents), 0)::bigint AS total_cents FROM sales WHERE shift_id = $1;
+SELECT count(*)::bigint AS sales, COALESCE(sum(total_cents), 0)::bigint AS total_cents FROM sales WHERE shift_id = $1 AND status <> 'voided';
 
 -- name: InsertCashMovement :one
 INSERT INTO cash_movements (shift_id, kind, amount_cents, reason, created_by) VALUES ($1, $2, $3, $4, $5) RETURNING id;

@@ -269,6 +269,9 @@ func (s *Service) render(ctx context.Context, actor *auth.Principal, t target) (
 		if err != nil {
 			return nil, translate(err)
 		}
+		if sale.Status == "voided" {
+			return nil, &ConflictError{Code: "sale_voided", Msg: "This sale was voided, so its receipt cannot be printed."}
+		}
 		biz, inclusive, err := s.business(ctx, actor)
 		if err != nil {
 			return nil, err
@@ -688,6 +691,11 @@ func (s *Service) Reprint(ctx context.Context, actor *auth.Principal, id int64, 
 		}
 		if !actor.Has(perm) {
 			return ErrForbidden
+		}
+		if src.DocType == DocReceipt && src.SaleID.Valid {
+			if sale, err := s.sales.GetSale(ctx, actor, src.SaleID.Int64); err == nil && sale.Status == "voided" {
+				return &ConflictError{Code: "sale_voided", Msg: "This sale was voided, so its receipt cannot be printed again."}
+			}
 		}
 		if src.Status != "printed" && src.Status != "reprinted" {
 			return &ConflictError{Code: "not_printed", Msg: "Only a job that has printed can be reprinted (this one is " + src.Status + "). Retry a failed job instead."}

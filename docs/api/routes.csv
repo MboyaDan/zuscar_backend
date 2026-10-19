@@ -65,8 +65,9 @@ POST,/api/v1/sales/{id}/payments,sales.create,Y,11,"cash confirmed, other manual
 POST,/api/v1/payments/{id}/confirm,payments.reconcile,Y,11,"pending to confirmed, audited"
 POST,/api/v1/payments/{id}/fail,payments.reconcile,-,11,"pending to failed, audited"
 GET,/api/v1/payments,sales.view,-,11,"filter by status, method, shift"
-POST,/api/v1/sales/{id}/void,sales.void,Y,15,"reason, compensating records"
-POST,/api/v1/sales/{id}/refunds,sales.refund,Y,15,"reason, approver, compensating records"
+POST,/api/v1/sales/{id}/void,sales.void,Y,15,"reason; whole sale, same business date, no refund yet; money goes back by the methods it came in by"
+POST,/api/v1/sales/{id}/refunds,sales.refund,Y,15,"reason, lines and payouts; any day; compensating records"
+GET,/api/v1/sales/{id}/refund-quote,sales.refund,-,15,"server-side sums for the chosen lines; writes nothing"
 POST,/api/v1/shifts/open,shifts.manage,Y,12,opening float
 GET,/api/v1/shifts/current,shifts.manage,-,12,
 GET,/api/v1/shifts,shifts.close,-,12,"own, or all for manager"
