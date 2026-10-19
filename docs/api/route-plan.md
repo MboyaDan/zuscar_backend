@@ -114,7 +114,7 @@ Design only: no route exists yet. The machine-readable source is `docs/api/route
 | GET | `/api/v1/print/documents/receipt/{saleId}` | sales.view | - | 14 | render data from stored snapshot |
 | GET | `/api/v1/print/documents/ticket/{ticketId}` | kitchen.view | - | 14 |  |
 | GET | `/api/v1/print/documents/bill/{orderId}` | sales.create | - | 14 |  |
-| POST | `/api/v1/print/jobs` | authenticated | - | 14 | permission checked per document type |
+| POST | `/api/v1/print/jobs` | authenticated | optional | 14 | permission checked per document type; optional Idempotency-Key |
 | POST | `/api/v1/print/jobs/{id}/attempts` | authenticated | - | 14 | record printed or failed |
 | POST | `/api/v1/print/jobs/{id}/retry` | authenticated | - | 14 | same job only |
 | POST | `/api/v1/print/jobs/{id}/reprint` | sales.reprint | - | 14 | new job, REPRINT marker; tickets need kitchen.view |
