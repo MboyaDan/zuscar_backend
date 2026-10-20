@@ -59,8 +59,11 @@ UPDATE guests SET full_name = $2, phone = $3, email = $4, notes = $5, updated_at
 -- name: ListReservations :many
 SELECT r.id, r.reservation_no, r.guest_id, g.full_name AS guest_name, COALESCE(g.phone, '')::text AS guest_phone,
        r.room_id, rm.number AS room_number, rt.name AS room_type, r.status, r.check_in, r.check_out, (r.check_out - r.check_in)::int AS nights,
-       r.adults, r.nightly_rate_cents, COALESCE(r.notes, '')::text AS notes, COALESCE(r.cancelled_reason, '')::text AS cancelled_reason, r.created_at
+       r.adults, r.nightly_rate_cents, COALESCE(r.notes, '')::text AS notes, COALESCE(r.cancelled_reason, '')::text AS cancelled_reason, r.created_at,
+       COALESCE(st.id, 0)::bigint AS stay_id, COALESCE(f.id, 0)::bigint AS folio_id
 FROM reservations r
+LEFT JOIN stays st ON st.reservation_id = r.id
+LEFT JOIN guest_folios f ON f.stay_id = st.id
 JOIN guests g ON g.id = r.guest_id
 JOIN rooms rm ON rm.id = r.room_id
 JOIN room_types rt ON rt.id = rm.room_type_id

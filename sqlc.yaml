@@ -44,6 +44,6 @@ sql:
       go: { package: repository, out: internal/purchasing/repository, sql_package: pgx/v5 }
   - engine: postgresql
     queries: database/queries/rooms
-    schema: [database/migrations/0002_identity.sql, database/migrations/0004_settings.sql, database/migrations/0025_rooms.sql]
+    schema: [database/migrations/0002_identity.sql, database/migrations/0004_settings.sql, database/migrations/0025_rooms.sql, database/migrations/0026_stays_folios.sql]
     gen:
       go: { package: repository, out: internal/rooms/repository, sql_package: pgx/v5 }

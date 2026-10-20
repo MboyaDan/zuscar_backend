@@ -2915,6 +2915,226 @@ paths:
         '403': *id001
         '404': *id001
         '409': *id001
+  /api/v1/reservations/{id}/check-in:
+    post:
+      summary: Check the guest in
+      description: 'Needs rooms.manage and an Idempotency-Key. Makes the stay and folio and posts one room-night charge per booked night. 409: not_confirmed, already_checked_in, too_early, reservation_past, room_not_ready.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      responses:
+        '201':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/rooms/in-house:
+    get:
+      summary: Guests in the house
+      description: 'Needs rooms.view. Room, guest and dates for everyone; folio_id and balance_cents only with folios.view.'
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: OK
+        '401': *id001
+        '403': *id001
+  /api/v1/rooms/{id}/status:
+    post:
+      summary: Change a room status by hand
+      description: 'Needs rooms.manage. Allowed moves only (409 invalid_transition); out_of_service needs a reason; a room with a guest in it is 409 room_occupied.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [status], properties: {status: {type: string, enum: [dirty, cleaning, vacant_ready, out_of_service]}, reason: {type: string, maxLength: 200}}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/stays/{id}/extend:
+    post:
+      summary: Extend a stay
+      description: 'Needs rooms.manage. Later check-out date only; posts the extra nights. 409 room_unavailable, folio_closed, stay_ended.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [check_out], properties: {check_out: {type: string, format: date}}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/stays/{id}/change-room:
+    post:
+      summary: Move the guest to another room
+      description: 'Needs rooms.manage. Reason required. Old room becomes dirty, new room occupied; the rate stays. 409 room_not_ready, room_unavailable.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [room_id, reason], properties: {room_id: {type: integer, format: int64}, reason: {type: string, maxLength: 200}}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/stays/{id}/check-out:
+    post:
+      summary: Check the guest out
+      description: 'Needs folios.manage and an Idempotency-Key. Closes the folio, ends the stay, marks the room dirty. 409 balance_due, payments_pending, stay_ended.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/folios/{id}:
+    get:
+      summary: Get a guest folio
+      description: 'Needs folios.view. Items, payments and totals (items, paid, pending, write-off, balance).'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      responses:
+        '200':
+          description: OK
+        '401': *id001
+        '403': *id001
+        '404': *id001
+  /api/v1/folios/{id}/payments:
+    post:
+      summary: Take a deposit or settlement
+      description: 'Needs folios.manage and an Idempotency-Key. Cash needs the open shift of whoever takes it; others wait for confirmation. Cannot exceed the balance less pending money (400 validation_failed). 409 folio_closed, duplicate_reference.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [method, amount_cents], properties: {method: {type: string, enum: [cash, mpesa_manual, card_manual, bank_manual]}, amount_cents: {type: integer, minimum: 1}, reference: {type: string}, purpose: {type: string, enum: [deposit, settlement]}, note: {type: string}}}
+      responses:
+        '201':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/folios/{id}/adjustments:
+    post:
+      summary: Add a charge or credit to a folio
+      description: 'Needs folios.manage and an Idempotency-Key. Reason required. A credit, or reverses_item_id (credits that item in full, once), also needs sales.refund (409 manager_required, already_reversed, folio_closed).'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [reason], properties: {description: {type: string}, amount_cents: {type: integer}, reverses_item_id: {type: integer, format: int64}, reason: {type: string, maxLength: 200}}}
+      responses:
+        '201':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/folios/{id}/write-off:
+    post:
+      summary: Write off part of what is owed
+      description: 'Needs folios.manage and sales.refund, and an Idempotency-Key. Set once; at most the balance; reason required. 409 manager_required, write_off_exists.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [amount_cents, reason], properties: {amount_cents: {type: integer, minimum: 1}, reason: {type: string, maxLength: 200}}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/folios/{id}/close:
+    post:
+      summary: Close a settled folio
+      description: 'Needs folios.manage. 409 balance_due, payments_pending, guest_in_house.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/folios/{id}/reopen:
+    post:
+      summary: Reopen a closed folio
+      description: 'Needs folios.manage. Reason required. 409 folio_open.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [reason], properties: {reason: {type: string, maxLength: 200}}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
 components:
   securitySchemes:
     sessionCookie:

@@ -36,6 +36,8 @@ type ReservationView struct {
 	Notes            string    `json:"notes"`
 	CancelledReason  string    `json:"cancelled_reason"`
 	CreatedAt        time.Time `json:"created_at"`
+	StayID           *int64    `json:"stay_id"`  // set once the guest has checked in
+	FolioID          *int64    `json:"folio_id"` // the guest's account for that stay
 }
 
 type ReservationInput struct {
@@ -73,7 +75,7 @@ func resView(r repository.ListReservationsRow) ReservationView {
 	return ReservationView{ID: r.ID, ReservationNo: r.ReservationNo, GuestID: r.GuestID, GuestName: r.GuestName, GuestPhone: r.GuestPhone,
 		RoomID: r.RoomID, RoomNumber: r.RoomNumber, RoomType: r.RoomType, Status: r.Status, CheckIn: dateStr(r.CheckIn), CheckOut: dateStr(r.CheckOut),
 		Nights: int(r.Nights), Adults: int(r.Adults), NightlyRateCents: r.NightlyRateCents, TotalCents: int64(r.Nights) * r.NightlyRateCents,
-		Notes: r.Notes, CancelledReason: r.CancelledReason, CreatedAt: r.CreatedAt.Time}
+		Notes: r.Notes, CancelledReason: r.CancelledReason, CreatedAt: r.CreatedAt.Time, StayID: idPtr(r.StayID), FolioID: idPtr(r.FolioID)}
 }
 
 func (s *Service) load(ctx context.Context, q *repository.Queries, id int64) (ReservationView, error) {
@@ -551,4 +553,11 @@ func (s *Service) Availability(ctx context.Context, actor *auth.Principal, from,
 		out = append(out, a)
 	}
 	return out, nil
+}
+
+func idPtr(v int64) *int64 {
+	if v == 0 {
+		return nil
+	}
+	return &v
 }

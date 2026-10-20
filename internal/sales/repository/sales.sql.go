@@ -41,8 +41,26 @@ func (q *Queries) FailPayment(ctx context.Context, arg FailPaymentParams) error 
 	return err
 }
 
+const folioPaymentTotals = `-- name: FolioPaymentTotals :one
+SELECT COALESCE(sum(amount_cents) FILTER (WHERE status = 'confirmed'), 0)::bigint AS confirmed_cents,
+       COALESCE(sum(amount_cents) FILTER (WHERE status = 'pending_confirmation'), 0)::bigint AS pending_cents
+FROM payments WHERE folio_id = $1
+`
+
+type FolioPaymentTotalsRow struct {
+	ConfirmedCents int64
+	PendingCents   int64
+}
+
+func (q *Queries) FolioPaymentTotals(ctx context.Context, folioID pgtype.Int8) (FolioPaymentTotalsRow, error) {
+	row := q.db.QueryRow(ctx, folioPaymentTotals, folioID)
+	var i FolioPaymentTotalsRow
+	err := row.Scan(&i.ConfirmedCents, &i.PendingCents)
+	return i, err
+}
+
 const getPaymentRecord = `-- name: GetPaymentRecord :one
-SELECT p.id, p.sale_id, COALESCE(s.receipt_no, 0)::bigint AS receipt_no, p.method, p.status, p.amount_cents, COALESCE(p.reference, '')::text AS reference,
+SELECT p.id, p.sale_id, p.folio_id, p.purpose, COALESCE(s.receipt_no, 0)::bigint AS receipt_no, p.method, p.status, p.amount_cents, COALESCE(p.reference, '')::text AS reference,
        p.created_by, cu.display_name AS created_by_name, p.created_at, COALESCE(p.confirmed_by, 0)::bigint AS confirmed_by, p.confirmed_at,
        COALESCE(p.failed_by, 0)::bigint AS failed_by, p.failed_at, p.note, COALESCE(p.shift_id, 0)::bigint AS shift_id
 FROM payments p
@@ -54,6 +72,8 @@ WHERE p.id = $1
 type GetPaymentRecordRow struct {
 	ID            int64
 	SaleID        pgtype.Int8
+	FolioID       pgtype.Int8
+	Purpose       string
 	ReceiptNo     int64
 	Method        string
 	Status        string
@@ -76,6 +96,8 @@ func (q *Queries) GetPaymentRecord(ctx context.Context, id int64) (GetPaymentRec
 	err := row.Scan(
 		&i.ID,
 		&i.SaleID,
+		&i.FolioID,
+		&i.Purpose,
 		&i.ReceiptNo,
 		&i.Method,
 		&i.Status,
@@ -95,18 +117,19 @@ func (q *Queries) GetPaymentRecord(ctx context.Context, id int64) (GetPaymentRec
 }
 
 const getPaymentTarget = `-- name: GetPaymentTarget :one
-SELECT id, sale_id FROM payments WHERE id = $1
+SELECT id, sale_id, folio_id FROM payments WHERE id = $1
 `
 
 type GetPaymentTargetRow struct {
-	ID     int64
-	SaleID pgtype.Int8
+	ID      int64
+	SaleID  pgtype.Int8
+	FolioID pgtype.Int8
 }
 
 func (q *Queries) GetPaymentTarget(ctx context.Context, id int64) (GetPaymentTargetRow, error) {
 	row := q.db.QueryRow(ctx, getPaymentTarget, id)
 	var i GetPaymentTargetRow
-	err := row.Scan(&i.ID, &i.SaleID)
+	err := row.Scan(&i.ID, &i.SaleID, &i.FolioID)
 	return i, err
 }
 
@@ -175,6 +198,45 @@ SELECT id FROM sales WHERE order_id = $1
 
 func (q *Queries) GetSaleIDByOrder(ctx context.Context, orderID pgtype.Int8) (int64, error) {
 	row := q.db.QueryRow(ctx, getSaleIDByOrder, orderID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const insertFolioPayment = `-- name: InsertFolioPayment :one
+INSERT INTO payments (folio_id, purpose, method, status, amount_cents, reference, created_by, confirmed_by, confirmed_at, note, shift_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id
+`
+
+type InsertFolioPaymentParams struct {
+	FolioID     pgtype.Int8
+	Purpose     string
+	Method      string
+	Status      string
+	AmountCents int64
+	Reference   pgtype.Text
+	CreatedBy   int64
+	ConfirmedBy pgtype.Int8
+	ConfirmedAt pgtype.Timestamptz
+	Note        string
+	ShiftID     pgtype.Int8
+}
+
+// Folio payments (Stage 23). The folio row is locked by the rooms module before these run.
+func (q *Queries) InsertFolioPayment(ctx context.Context, arg InsertFolioPaymentParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertFolioPayment,
+		arg.FolioID,
+		arg.Purpose,
+		arg.Method,
+		arg.Status,
+		arg.AmountCents,
+		arg.Reference,
+		arg.CreatedBy,
+		arg.ConfirmedBy,
+		arg.ConfirmedAt,
+		arg.Note,
+		arg.ShiftID,
+	)
 	var id int64
 	err := row.Scan(&id)
 	return id, err
@@ -315,7 +377,7 @@ func (q *Queries) InsertSaleItem(ctx context.Context, arg InsertSaleItemParams) 
 }
 
 const listPayments = `-- name: ListPayments :many
-SELECT p.id, p.sale_id, COALESCE(s.receipt_no, 0)::bigint AS receipt_no, p.method, p.status, p.amount_cents, COALESCE(p.reference, '')::text AS reference,
+SELECT p.id, p.sale_id, p.folio_id, p.purpose, COALESCE(s.receipt_no, 0)::bigint AS receipt_no, p.method, p.status, p.amount_cents, COALESCE(p.reference, '')::text AS reference,
        p.created_by, cu.display_name AS created_by_name, p.created_at, COALESCE(p.confirmed_by, 0)::bigint AS confirmed_by, p.confirmed_at,
        COALESCE(p.failed_by, 0)::bigint AS failed_by, p.failed_at, p.note, COALESCE(p.shift_id, 0)::bigint AS shift_id
 FROM payments p
@@ -325,10 +387,11 @@ WHERE ($1::text = '' OR p.status = $1::text)
   AND ($2::text = '' OR p.method = $2::text)
   AND ($3::bigint = 0 OR p.shift_id = $3::bigint)
   AND ($4::bigint = 0 OR p.sale_id = $4::bigint)
-  AND ($5::bigint = 0 OR s.cashier_id = $5::bigint OR s.waiter_id = $5::bigint)
-  AND ($6::bigint = 0 OR p.id < $6::bigint)
+  AND ($5::bigint = 0 OR p.folio_id = $5::bigint)
+  AND ($6::bigint = 0 OR (p.sale_id IS NOT NULL AND (s.cashier_id = $6::bigint OR s.waiter_id = $6::bigint)))
+  AND ($7::bigint = 0 OR p.id < $7::bigint)
 ORDER BY p.id DESC
-LIMIT $7::int
+LIMIT $8::int
 `
 
 type ListPaymentsParams struct {
@@ -336,6 +399,7 @@ type ListPaymentsParams struct {
 	Method   string
 	ShiftID  int64
 	SaleID   int64
+	FolioID  int64
 	OnlyUser int64
 	BeforeID int64
 	RowLimit int32
@@ -344,6 +408,8 @@ type ListPaymentsParams struct {
 type ListPaymentsRow struct {
 	ID            int64
 	SaleID        pgtype.Int8
+	FolioID       pgtype.Int8
+	Purpose       string
 	ReceiptNo     int64
 	Method        string
 	Status        string
@@ -367,6 +433,7 @@ func (q *Queries) ListPayments(ctx context.Context, arg ListPaymentsParams) ([]L
 		arg.Method,
 		arg.ShiftID,
 		arg.SaleID,
+		arg.FolioID,
 		arg.OnlyUser,
 		arg.BeforeID,
 		arg.RowLimit,
@@ -381,6 +448,8 @@ func (q *Queries) ListPayments(ctx context.Context, arg ListPaymentsParams) ([]L
 		if err := rows.Scan(
 			&i.ID,
 			&i.SaleID,
+			&i.FolioID,
+			&i.Purpose,
 			&i.ReceiptNo,
 			&i.Method,
 			&i.Status,

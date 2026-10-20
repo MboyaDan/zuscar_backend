@@ -132,6 +132,21 @@ func (h *Handler) Register(v1 *gin.RouterGroup, guard ...gin.HandlerFunc) {
 	b.POST("/:id/confirm", manage, h.confirmReservation)
 	b.POST("/:id/cancel", manage, h.cancelReservation)
 	b.POST("/:id/no-show", manage, h.noShow)
+	b.POST("/:id/check-in", manage, idempotency.Required(), h.checkIn)
+	r.GET("/in-house", requirePermission("rooms.view"), h.inHouse)
+	r.POST("/:id/status", manage, h.roomStatus)
+	st := v1.Group("/stays", guard...)
+	st.POST("/:id/extend", manage, h.extendStay)
+	st.POST("/:id/change-room", manage, h.changeRoom)
+	st.POST("/:id/check-out", requirePermission("folios.manage"), idempotency.Required(), h.checkOut)
+	f := v1.Group("/folios", guard...)
+	fm := requirePermission("folios.manage")
+	f.GET("/:id", requirePermission("folios.view"), h.getFolio)
+	f.POST("/:id/payments", fm, idempotency.Required(), h.folioPayment)
+	f.POST("/:id/adjustments", fm, idempotency.Required(), h.folioAdjustment)
+	f.POST("/:id/write-off", fm, idempotency.Required(), h.folioWriteOff)
+	f.POST("/:id/close", fm, h.folioClose)
+	f.POST("/:id/reopen", fm, h.folioReopen)
 }
 
 func (h *Handler) listTypes(c *gin.Context) {
@@ -435,4 +450,214 @@ func (h *Handler) noShow(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"reservation": out})
+}
+
+func (h *Handler) checkIn(c *gin.Context) {
+	id, ok := idParam(c, "reservation")
+	if !ok {
+		return
+	}
+	out, replayed, err := h.svc.CheckIn(c.Request.Context(), auth.From(c), id, idempotency.From(c), meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	if replayed != nil {
+		replay(c, replayed)
+		return
+	}
+	c.JSON(http.StatusCreated, out)
+}
+
+func (h *Handler) inHouse(c *gin.Context) {
+	out, err := h.svc.InHouse(c.Request.Context(), auth.From(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"stays": out})
+}
+
+func (h *Handler) roomStatus(c *gin.Context) {
+	id, ok := idParam(c, "room")
+	if !ok {
+		return
+	}
+	var in struct {
+		Status string `json:"status"`
+		Reason string `json:"reason"`
+	}
+	if !body(c, &in) {
+		return
+	}
+	out, err := h.svc.SetRoomStatus(c.Request.Context(), auth.From(c), id, in.Status, in.Reason, meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"room": out})
+}
+
+func (h *Handler) extendStay(c *gin.Context) {
+	id, ok := idParam(c, "stay")
+	if !ok {
+		return
+	}
+	var in struct {
+		CheckOut string `json:"check_out"`
+	}
+	if !body(c, &in) {
+		return
+	}
+	out, err := h.svc.ExtendStay(c.Request.Context(), auth.From(c), id, in.CheckOut, meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+func (h *Handler) changeRoom(c *gin.Context) {
+	id, ok := idParam(c, "stay")
+	if !ok {
+		return
+	}
+	var in struct {
+		RoomID int64  `json:"room_id"`
+		Reason string `json:"reason"`
+	}
+	if !body(c, &in) {
+		return
+	}
+	out, err := h.svc.ChangeRoom(c.Request.Context(), auth.From(c), id, in.RoomID, in.Reason, meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+func (h *Handler) checkOut(c *gin.Context) {
+	id, ok := idParam(c, "stay")
+	if !ok {
+		return
+	}
+	out, replayed, err := h.svc.CheckOut(c.Request.Context(), auth.From(c), id, idempotency.From(c), meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	if replayed != nil {
+		replay(c, replayed)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"folio": out})
+}
+
+func (h *Handler) getFolio(c *gin.Context) {
+	id, ok := idParam(c, "folio")
+	if !ok {
+		return
+	}
+	out, err := h.svc.GetFolio(c.Request.Context(), auth.From(c), id)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"folio": out})
+}
+
+// folioReply sends the folio, or the stored answer of a retried request.
+func folioReply(c *gin.Context, status int, out any, replayed *idempotency.Stored) {
+	if replayed != nil {
+		replay(c, replayed)
+		return
+	}
+	c.JSON(status, gin.H{"folio": out})
+}
+
+func (h *Handler) folioPayment(c *gin.Context) {
+	id, ok := idParam(c, "folio")
+	if !ok {
+		return
+	}
+	var in service.PaymentInput
+	if !body(c, &in) {
+		return
+	}
+	out, replayed, err := h.svc.TakePayment(c.Request.Context(), auth.From(c), id, in, idempotency.From(c), meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	folioReply(c, http.StatusCreated, out, replayed)
+}
+
+func (h *Handler) folioAdjustment(c *gin.Context) {
+	id, ok := idParam(c, "folio")
+	if !ok {
+		return
+	}
+	var in service.AdjustmentInput
+	if !body(c, &in) {
+		return
+	}
+	out, replayed, err := h.svc.PostAdjustment(c.Request.Context(), auth.From(c), id, in, idempotency.From(c), meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	folioReply(c, http.StatusCreated, out, replayed)
+}
+
+func (h *Handler) folioWriteOff(c *gin.Context) {
+	id, ok := idParam(c, "folio")
+	if !ok {
+		return
+	}
+	var in struct {
+		AmountCents int64  `json:"amount_cents"`
+		Reason      string `json:"reason"`
+	}
+	if !body(c, &in) {
+		return
+	}
+	out, replayed, err := h.svc.WriteOff(c.Request.Context(), auth.From(c), id, in.AmountCents, in.Reason, idempotency.From(c), meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	folioReply(c, http.StatusOK, out, replayed)
+}
+
+func (h *Handler) folioClose(c *gin.Context) {
+	id, ok := idParam(c, "folio")
+	if !ok {
+		return
+	}
+	out, err := h.svc.CloseFolio(c.Request.Context(), auth.From(c), id, meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"folio": out})
+}
+
+func (h *Handler) folioReopen(c *gin.Context) {
+	id, ok := idParam(c, "folio")
+	if !ok {
+		return
+	}
+	var in struct {
+		Reason string `json:"reason"`
+	}
+	if !body(c, &in) {
+		return
+	}
+	out, err := h.svc.ReopenFolio(c.Request.Context(), auth.From(c), id, in.Reason, meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"folio": out})
 }

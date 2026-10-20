@@ -54,7 +54,7 @@ SELECT id, receipt_no, status, payment_status, total_cents, cashier_id, COALESCE
 FROM sales WHERE id = $1 FOR UPDATE;
 
 -- name: GetPaymentTarget :one
-SELECT id, sale_id FROM payments WHERE id = $1;
+SELECT id, sale_id, folio_id FROM payments WHERE id = $1;
 
 -- name: LockPayment :one
 SELECT id, sale_id, status FROM payments WHERE id = $1 FOR UPDATE;
@@ -66,7 +66,7 @@ UPDATE payments SET status = 'confirmed', confirmed_by = $2, confirmed_at = now(
 UPDATE payments SET status = 'failed', failed_by = $2, failed_at = now(), note = $3, updated_at = now() WHERE id = $1;
 
 -- name: GetPaymentRecord :one
-SELECT p.id, p.sale_id, COALESCE(s.receipt_no, 0)::bigint AS receipt_no, p.method, p.status, p.amount_cents, COALESCE(p.reference, '')::text AS reference,
+SELECT p.id, p.sale_id, p.folio_id, p.purpose, COALESCE(s.receipt_no, 0)::bigint AS receipt_no, p.method, p.status, p.amount_cents, COALESCE(p.reference, '')::text AS reference,
        p.created_by, cu.display_name AS created_by_name, p.created_at, COALESCE(p.confirmed_by, 0)::bigint AS confirmed_by, p.confirmed_at,
        COALESCE(p.failed_by, 0)::bigint AS failed_by, p.failed_at, p.note, COALESCE(p.shift_id, 0)::bigint AS shift_id
 FROM payments p
@@ -76,7 +76,7 @@ WHERE p.id = $1;
 
 -- Newest first. only_user limits the list to payments on sales that person took or served (S-47); zero means no limit.
 -- name: ListPayments :many
-SELECT p.id, p.sale_id, COALESCE(s.receipt_no, 0)::bigint AS receipt_no, p.method, p.status, p.amount_cents, COALESCE(p.reference, '')::text AS reference,
+SELECT p.id, p.sale_id, p.folio_id, p.purpose, COALESCE(s.receipt_no, 0)::bigint AS receipt_no, p.method, p.status, p.amount_cents, COALESCE(p.reference, '')::text AS reference,
        p.created_by, cu.display_name AS created_by_name, p.created_at, COALESCE(p.confirmed_by, 0)::bigint AS confirmed_by, p.confirmed_at,
        COALESCE(p.failed_by, 0)::bigint AS failed_by, p.failed_at, p.note, COALESCE(p.shift_id, 0)::bigint AS shift_id
 FROM payments p
@@ -86,7 +86,8 @@ WHERE (sqlc.arg('status')::text = '' OR p.status = sqlc.arg('status')::text)
   AND (sqlc.arg('method')::text = '' OR p.method = sqlc.arg('method')::text)
   AND (sqlc.arg('shift_id')::bigint = 0 OR p.shift_id = sqlc.arg('shift_id')::bigint)
   AND (sqlc.arg('sale_id')::bigint = 0 OR p.sale_id = sqlc.arg('sale_id')::bigint)
-  AND (sqlc.arg('only_user')::bigint = 0 OR s.cashier_id = sqlc.arg('only_user')::bigint OR s.waiter_id = sqlc.arg('only_user')::bigint)
+  AND (sqlc.arg('folio_id')::bigint = 0 OR p.folio_id = sqlc.arg('folio_id')::bigint)
+  AND (sqlc.arg('only_user')::bigint = 0 OR (p.sale_id IS NOT NULL AND (s.cashier_id = sqlc.arg('only_user')::bigint OR s.waiter_id = sqlc.arg('only_user')::bigint)))
   AND (sqlc.arg('before_id')::bigint = 0 OR p.id < sqlc.arg('before_id')::bigint)
 ORDER BY p.id DESC
 LIMIT sqlc.arg('row_limit')::int;
@@ -107,3 +108,13 @@ WHERE (sqlc.arg('status')::text = '' OR s.status = sqlc.arg('status')::text)
   AND (sqlc.arg('before_id')::bigint = 0 OR s.id < sqlc.arg('before_id')::bigint)
 ORDER BY s.id DESC
 LIMIT sqlc.arg('row_limit')::int;
+
+-- Folio payments (Stage 23). The folio row is locked by the rooms module before these run.
+-- name: InsertFolioPayment :one
+INSERT INTO payments (folio_id, purpose, method, status, amount_cents, reference, created_by, confirmed_by, confirmed_at, note, shift_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id;
+
+-- name: FolioPaymentTotals :one
+SELECT COALESCE(sum(amount_cents) FILTER (WHERE status = 'confirmed'), 0)::bigint AS confirmed_cents,
+       COALESCE(sum(amount_cents) FILTER (WHERE status = 'pending_confirmation'), 0)::bigint AS pending_cents
+FROM payments WHERE folio_id = $1;

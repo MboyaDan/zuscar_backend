@@ -93,7 +93,7 @@ stateDiagram-v2
 ```
 Blocking statuses are confirmed and checked_in (DQ-09 default); the exclusion constraint on (room, [check_in, check_out)) rejects any second blocking row, so concurrent attempts cannot both succeed (AC-07, spiked). Overlap violation maps to 409 `room_unavailable`. Check-in needs the room physically vacant_ready or reserved and the date window valid; it creates the stay and the folio. Stay extension is an update of check_out under the same constraint.
 
-Stage 22 builds the part before arrival: making a booking (confirmed, or tentative as a hold), changing it, confirming a hold, cancelling with a reason and marking no-show (from the arrival date on). A change of room or dates is held to the same overlap rule as a new booking. The nightly rate is copied at booking time (S-94). Check-in, the stay and the folio are Stage 23.
+Stage 22 builds the part before arrival: making a booking (confirmed, or tentative as a hold), changing it, confirming a hold, cancelling with a reason and marking no-show (from the arrival date on). A change of room or dates is held to the same overlap rule as a new booking. The nightly rate is copied at booking time (S-94). Check-in, the stay and the folio are described below (Stage 23).
 
 ## 6. Room (physical status)
 ```mermaid
@@ -169,3 +169,13 @@ Purchasing (Stage 19, S-81 to S-84): a purchase is written as a draft (supplier,
 Receiving what arrived (Stage 20, S-85 to S-88): the draft keeps the order. At receiving, each line records what really came (a quantity, 0 if it did not) and the price paid, and the stock and cost follow that. Nothing arriving at all is refused. The delivery shows ordered next to arrived, and marks a line whose receipt was later reversed.
 
 Stock counts and low stock (Stage 21, S-89 to S-92): a count is a sheet for one place. Each line holds what was on the shelf and what the books said when it was entered; approving posts only the difference, so sales and deliveries during the count are kept, and a place may end below zero. A draft can be cancelled; an approved count is fixed and is corrected by reversing its movements. The low-stock list shows active items at or under their level, lowest first.
+
+### Check-in, the stay, the folio and room status (Stage 23)
+
+- **Check-in** (rooms.manage, needs an Idempotency-Key): only a confirmed booking, from its arrival date, into a room that is vacant and ready. It makes one stay and one folio and posts a room-night charge for each booked night. The room becomes occupied. A retry returns the same result.
+- **The folio** holds charges and adjustments (never edited), and payments (from the payments table, purpose deposit or settlement). Balance = items minus confirmed payments minus any write-off. Pending payments are shown but not counted until confirmed. A charge is not a payment.
+- **Taking money** (folios.manage): cash needs the taker's open shift; the amount cannot exceed what is still owed after pending money.
+- **Adjustments**: the desk adds charges with a reason; credits and reversing an item, and the write-off, need a manager (`sales.refund`). Each item is reversed once.
+- **Extend** (later date only) posts the extra nights and needs the room free; **change room** needs a reason and a ready room, marks the old room dirty and the new one occupied, and keeps the rate.
+- **Check-out** (folios.manage): zero balance and no pending payments; closes the folio, ends the stay, marks the booking checked out and the room dirty. **Reopen** a closed folio with a reason for a late charge; **close** it again once settled.
+- **Room status by hand**: dirty to cleaning, cleaning to vacant ready, vacant ready or dirty to out of service (reason needed), out of service to dirty. Occupied rooms are changed only by check-out or room change.
