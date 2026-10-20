@@ -140,16 +140,16 @@ POST,/api/v1/stays/{id}/change-room,rooms.manage,-,21,under the same constraint
 POST,/api/v1/stays/{id}/check-out,folios.manage,Y,21,consolidated checkout
 GET,/api/v1/rooms/in-house,rooms.view,-,21,limited fields for charge authorisation
 GET,/api/v1/folios/{id},folios.view,-,21,
-POST,/api/v1/folios/{id}/charges,folios.post,Y,24,"POS room charge, a posting not a payment"
+POST,/api/v1/folios/{id}/charges,folios.post,Y,21,"POS room charge, a posting not a payment"
 POST,/api/v1/folios/{id}/payments,folios.manage,Y,21,deposit or settlement
 POST,/api/v1/folios/{id}/adjustments,folios.manage,Y,21,reason; manager scope
 POST,/api/v1/folios/{id}/write-off,folios.manage,Y,21,"manager scope, approver recorded"
 POST,/api/v1/folios/{id}/close,folios.manage,-,21,balance checked in transaction
 POST,/api/v1/folios/{id}/reopen,folios.manage,-,21,S-20
 POST,/api/v1/rooms/{id}/status,rooms.manage,-,21,transition table in behaviour.md
-GET,/api/v1/housekeeping/tasks,rooms.manage,-,24,
-POST,/api/v1/housekeeping/tasks,rooms.manage,-,24,
-PATCH,/api/v1/housekeeping/tasks/{id},rooms.manage,-,24,
+GET,/api/v1/housekeeping/tasks,rooms.manage,-,21,
+POST,/api/v1/housekeeping/tasks,rooms.manage,-,21,
+PATCH,/api/v1/housekeeping/tasks/{id},rooms.manage,-,21,
 GET,/api/v1/reports/sales,reports.view,-,23,?format=csv needs reports.export and is audited
 GET,/api/v1/reports/collections,reports.view,-,23,?format=csv needs reports.export and is audited
 GET,/api/v1/reports/balances-due,reports.view,-,23,?format=csv needs reports.export and is audited

@@ -213,6 +213,7 @@ type SaleView struct {
 	BalanceCents  int64              `json:"balance_cents"` // total minus confirmed payments
 	Status        string             `json:"status"`
 	PaymentStatus string             `json:"payment_status"`
+	FolioID       *int64             `json:"folio_id"` // the guest folio a room charge went to; null otherwise
 	Source        string             `json:"source"`
 	CashierID     int64              `json:"cashier_id"`
 	CashierName   string             `json:"cashier_name"`
@@ -261,6 +262,11 @@ func (s *Service) load(ctx context.Context, q *repository.Queries, id int64) (Sa
 		DiscountCents: h.DiscountCents, TaxCents: h.TaxCents, TotalCents: h.TotalCents, PaidCents: tot.ConfirmedCents, PendingCents: tot.PendingCents,
 		BalanceCents: h.TotalCents - tot.ConfirmedCents, Status: h.Status, PaymentStatus: h.PaymentStatus, Source: h.Source, CashierID: h.CashierID,
 		CashierName: h.CashierName, TaxStatus: h.TaxStatus, CreatedAt: h.CreatedAt.Time, Items: []SaleItemView{}, Payments: []PaymentView{}, Refunds: refs}
+	if h.FolioID.Valid {
+		fid := h.FolioID.Int64
+		v.FolioID = &fid
+		v.BalanceCents = 0 // the guest owes it on the folio, not on the sale
+	}
 	for _, r := range refs {
 		for _, p := range r.Payouts {
 			v.RefundedCents += p.AmountCents
@@ -460,50 +466,50 @@ func runeLen(s string) int { return len([]rune(s)) }
 
 // Finalise turns an order into a sale in one transaction. The prices come from the order (set by the server when
 // each line was added), never from the request. A retry with the same Idempotency-Key returns the stored sale.
-func (s *Service) Finalise(ctx context.Context, actor *auth.Principal, orderID int64, in FinaliseInput, idem *idempotency.Key, m Meta) (SaleView, *idempotency.Stored, error) {
-	if actor == nil || !actor.Has("sales.create") {
-		return SaleView{}, nil, ErrForbidden
-	}
+// finalisePrep is what a finalisation checks before it opens a transaction.
+type finalisePrep struct {
+	pays     []PaymentInput
+	disc     map[int64]DiscountInput
+	ts       taxSettings
+	blockNeg bool
+}
+
+func (s *Service) prepareFinalise(ctx context.Context, actor *auth.Principal, in FinaliseInput) (finalisePrep, error) {
 	if len(in.Discounts) > 0 && !actor.Has("sales.discount") {
-		return SaleView{}, nil, &ForbiddenError{Code: "discount_not_permitted", Msg: "Your role cannot give discounts."}
+		return finalisePrep{}, &ForbiddenError{Code: "discount_not_permitted", Msg: "Your role cannot give discounts."}
 	}
 	pays, err := checkPayments(in.Payments)
 	if err != nil {
-		return SaleView{}, nil, err
+		return finalisePrep{}, err
 	}
 	disc := map[int64]DiscountInput{}
 	for _, d := range in.Discounts {
 		reason := strings.TrimSpace(d.Reason)
 		if d.AmountCents <= 0 || runeLen(reason) < 1 || runeLen(reason) > 200 {
-			return SaleView{}, nil, &ValidationError{Field: "discounts", Msg: "each discount needs an amount above 0 and a reason of 1 to 200 characters"}
+			return finalisePrep{}, &ValidationError{Field: "discounts", Msg: "each discount needs an amount above 0 and a reason of 1 to 200 characters"}
 		}
 		if _, dup := disc[d.OrderItemID]; dup {
-			return SaleView{}, nil, &ValidationError{Field: "discounts", Msg: "gives the same line two discounts"}
+			return finalisePrep{}, &ValidationError{Field: "discounts", Msg: "gives the same line two discounts"}
 		}
 		disc[d.OrderItemID] = DiscountInput{OrderItemID: d.OrderItemID, AmountCents: d.AmountCents, Reason: reason}
 	}
 	ts, err := s.taxSettings(ctx, actor)
 	if err != nil {
-		return SaleView{}, nil, err
+		return finalisePrep{}, err
 	}
 	blockNeg := s.stock.BlocksNegative(ctx, actor)
 	if !ts.inclusive {
-		return SaleView{}, nil, &ConflictError{Code: "tax_exclusive_unsupported", Msg: "Tax-exclusive pricing is not supported until the accountant confirms the rule (docs/tax-configuration.md)."}
+		return finalisePrep{}, &ConflictError{Code: "tax_exclusive_unsupported", Msg: "Tax-exclusive pricing is not supported until the accountant confirms the rule (docs/tax-configuration.md)."}
 	}
 
-	var out SaleView
-	var replay *idempotency.Stored
-	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if idem != nil {
-			st, err := idempotency.Begin(ctx, tx, idem)
-			if err != nil {
-				return err
-			}
-			if st != nil {
-				replay = st
-				return nil
-			}
-		}
+	return finalisePrep{pays, disc, ts, blockNeg}, nil
+}
+
+// finaliseTx makes the sale inside the caller's transaction. With a folio the sale is charged to it: no payments, and the
+// sale is stored as charged_to_folio from the start, because a sale never changes its folio afterwards (S-103).
+func (s *Service) finaliseTx(ctx context.Context, tx pgx.Tx, actor *auth.Principal, orderID int64, in FinaliseInput, pr finalisePrep, folio pgtype.Int8, m Meta) (out SaleView, err error) {
+	pays, disc, ts, blockNeg := pr.pays, pr.disc, pr.ts, pr.blockNeg
+	err = func() error {
 		o, err := s.orders.OrderForSale(ctx, tx, actor, orderID, true, in.ExpectedVersion)
 		if err != nil {
 			return err
@@ -511,8 +517,12 @@ func (s *Service) Finalise(ctx context.Context, actor *auth.Principal, orderID i
 		if len(o.Lines) == 0 {
 			return &ConflictError{Code: "order_empty", Msg: "This order has no items to sell."}
 		}
-		if err := checkSalesScope(actor, o.Lines); err != nil {
-			return err
+		// A waiter has no sales.create and charges to rooms with folios.post (the rooms module checks it), so the bar-only limit
+		// that holds back a bartender's own sales applies only to roles that sell in their own right.
+		if !folio.Valid || actor.Has("sales.create") {
+			if err := checkSalesScope(actor, o.Lines); err != nil {
+				return err
+			}
 		}
 		known := map[int64]bool{}
 		for _, l := range o.Lines {
@@ -554,6 +564,13 @@ func (s *Service) Finalise(ctx context.Context, actor *auth.Principal, orderID i
 			return &ValidationError{Field: "payments", Msg: "add up to more than the total (" + itoa(total) + " cents); record only the amount that settles the bill"}
 		}
 
+		status := paymentStatus(total, confirmed)
+		if folio.Valid {
+			if total <= 0 {
+				return &ConflictError{Code: "nothing_to_charge", Msg: "This order totals nothing, so there is nothing to charge to a room."}
+			}
+			status = "charged_to_folio"
+		}
 		q := repository.New(tx)
 		shift, err := s.shiftFor(ctx, q, actor, hasCash(pays))
 		if err != nil {
@@ -571,7 +588,7 @@ func (s *Service) Finalise(ctx context.Context, actor *auth.Principal, orderID i
 		day := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, time.UTC)
 		waiter := pgtype.Int8{Int64: o.OpenedBy, Valid: true}
 		saleID, err := q.InsertSale(ctx, repository.InsertSaleParams{ReceiptNo: no, OrderID: pgtype.Int8{Int64: o.ID, Valid: true}, BusinessDate: pgtype.Date{Time: day, Valid: true},
-			SubtotalCents: sub, DiscountCents: discount, TaxCents: tax, TotalCents: total, PaymentStatus: paymentStatus(total, confirmed), CashierID: actor.UserID, WaiterID: waiter, TaxStatus: ts.status, ShiftID: shift})
+			SubtotalCents: sub, DiscountCents: discount, TaxCents: tax, TotalCents: total, PaymentStatus: status, FolioID: folio, CashierID: actor.UserID, WaiterID: waiter, TaxStatus: ts.status, ShiftID: shift})
 		if err != nil {
 			return err
 		}
@@ -635,13 +652,44 @@ func (s *Service) Finalise(ctx context.Context, actor *auth.Principal, orderID i
 		}
 		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 		if err := s.record(ctx, tx, actor, m, "sale.finalised", "sale", saleID, nil, map[string]any{"receipt_no": no, "order_id": o.ID, "order_no": o.OrderNo, "total_cents": total,
-			"discount_cents": discount, "tax_cents": tax, "payments": len(pays), "discounted_lines": ids, "tax_status": ts.status}); err != nil {
+			"discount_cents": discount, "tax_cents": tax, "payments": len(pays), "discounted_lines": ids, "tax_status": ts.status, "folio_id": folio.Int64}); err != nil {
 			return err
 		}
 		out, err = s.load(ctx, q, saleID)
 		if err != nil {
 			return err
 		}
+		return nil
+	}()
+	return out, err
+}
+
+func (s *Service) Finalise(ctx context.Context, actor *auth.Principal, orderID int64, in FinaliseInput, idem *idempotency.Key, m Meta) (SaleView, *idempotency.Stored, error) {
+	if actor == nil || !actor.Has("sales.create") {
+		return SaleView{}, nil, ErrForbidden
+	}
+	pr, err := s.prepareFinalise(ctx, actor, in)
+	if err != nil {
+		return SaleView{}, nil, err
+	}
+	var out SaleView
+	var replay *idempotency.Stored
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if idem != nil {
+			st, err := idempotency.Begin(ctx, tx, idem)
+			if err != nil {
+				return err
+			}
+			if st != nil {
+				replay = st
+				return nil
+			}
+		}
+		v, err := s.finaliseTx(ctx, tx, actor, orderID, in, pr, pgtype.Int8{}, m)
+		if err != nil {
+			return err
+		}
+		out = v
 		if idem != nil {
 			b, err := json.Marshal(map[string]any{"sale": out})
 			if err != nil {
@@ -652,6 +700,25 @@ func (s *Service) Finalise(ctx context.Context, actor *auth.Principal, orderID i
 		return nil
 	})
 	return out, replay, err
+}
+
+// ChargePrep is what a room charge checks before the caller opens its transaction (settings and stock policy are read
+// through other connections, so they must not be read while the transaction holds one).
+type ChargePrep struct{ p finalisePrep }
+
+func (s *Service) PrepareFolioCharge(ctx context.Context, actor *auth.Principal, in FinaliseInput) (ChargePrep, error) {
+	if len(in.Payments) > 0 {
+		return ChargePrep{}, &ValidationError{Field: "payments", Msg: "a room charge takes no payment; the guest settles the folio"}
+	}
+	p, err := s.prepareFinalise(ctx, actor, in)
+	return ChargePrep{p}, err
+}
+
+// FinaliseToFolio sells an order to the guest in a room: the sale is charged to the folio instead of being paid. The rooms
+// module calls it inside its own transaction after it has locked the folio and checked the guest is in the house, and
+// then posts the matching folio row. The caller checks the caller's right to post charges (folios.post).
+func (s *Service) FinaliseToFolio(ctx context.Context, tx pgx.Tx, actor *auth.Principal, folioID, orderID int64, in FinaliseInput, prep ChargePrep, m Meta) (SaleView, error) {
+	return s.finaliseTx(ctx, tx, actor, orderID, in, prep.p, pgtype.Int8{Int64: folioID, Valid: true}, m)
 }
 
 // ---- reading a sale ----

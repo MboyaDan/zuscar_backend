@@ -84,7 +84,10 @@ func (h *Handler) fail(c *gin.Context, err error) {
 	var verr *service.ValidationError
 	var nf *service.NotFoundError
 	var cf *service.ConflictError
+	var fe *service.ForbiddenError
 	switch {
+	case errors.As(err, &fe):
+		zhttp.WriteError(c, http.StatusForbidden, fe.Code, fe.Msg)
 	case errors.Is(err, service.ErrForbidden):
 		zhttp.WriteError(c, http.StatusForbidden, "forbidden", "You do not have permission to do this.")
 	case errors.As(err, &nf):
@@ -139,9 +142,14 @@ func (h *Handler) Register(v1 *gin.RouterGroup, guard ...gin.HandlerFunc) {
 	st.POST("/:id/extend", manage, h.extendStay)
 	st.POST("/:id/change-room", manage, h.changeRoom)
 	st.POST("/:id/check-out", requirePermission("folios.manage"), idempotency.Required(), h.checkOut)
+	hk := v1.Group("/housekeeping/tasks", guard...)
+	hk.GET("", manage, h.listTasks)
+	hk.POST("", manage, h.createTask)
+	hk.PATCH("/:id", manage, h.updateTask)
 	f := v1.Group("/folios", guard...)
 	fm := requirePermission("folios.manage")
 	f.GET("/:id", requirePermission("folios.view"), h.getFolio)
+	f.POST("/:id/charges", requirePermission("folios.post"), idempotency.Required(), h.folioCharge)
 	f.POST("/:id/payments", fm, idempotency.Required(), h.folioPayment)
 	f.POST("/:id/adjustments", fm, idempotency.Required(), h.folioAdjustment)
 	f.POST("/:id/write-off", fm, idempotency.Required(), h.folioWriteOff)
@@ -660,4 +668,68 @@ func (h *Handler) folioReopen(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"folio": out})
+}
+
+func (h *Handler) folioCharge(c *gin.Context) {
+	id, ok := idParam(c, "folio")
+	if !ok {
+		return
+	}
+	var in service.ChargeInput
+	if !body(c, &in) {
+		return
+	}
+	out, replayed, err := h.svc.PostCharge(c.Request.Context(), auth.From(c), id, in, idempotency.From(c), meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	if replayed != nil {
+		replay(c, replayed)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"charge": out})
+}
+
+func (h *Handler) listTasks(c *gin.Context) {
+	roomID, ok := queryInt(c, "room_id")
+	if !ok {
+		return
+	}
+	out, err := h.svc.ListTasks(c.Request.Context(), auth.From(c), c.Query("status"), roomID)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"tasks": out})
+}
+
+func (h *Handler) createTask(c *gin.Context) {
+	var in service.TaskInput
+	if !body(c, &in) {
+		return
+	}
+	out, err := h.svc.CreateTask(c.Request.Context(), auth.From(c), in, meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"task": out})
+}
+
+func (h *Handler) updateTask(c *gin.Context) {
+	id, ok := idParam(c, "task")
+	if !ok {
+		return
+	}
+	var in service.TaskUpdate
+	if !body(c, &in) {
+		return
+	}
+	out, err := h.svc.UpdateTask(c.Request.Context(), auth.From(c), id, in, meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"task": out})
 }

@@ -179,3 +179,8 @@ Stock counts and low stock (Stage 21, S-89 to S-92): a count is a sheet for one 
 - **Extend** (later date only) posts the extra nights and needs the room free; **change room** needs a reason and a ready room, marks the old room dirty and the new one occupied, and keeps the rate.
 - **Check-out** (folios.manage): zero balance and no pending payments; closes the folio, ends the stay, marks the booking checked out and the room dirty. **Reopen** a closed folio with a reason for a late charge; **close** it again once settled.
 - **Room status by hand**: dirty to cleaning, cleaning to vacant ready, vacant ready or dirty to out of service (reason needed), out of service to dirty. Occupied rooms are changed only by check-out or room change.
+
+### Room charges and housekeeping (Stage 24)
+
+- **Charge to room** (folios.post, Idempotency-Key): an order is sold to the guest in a room. It is a sale with a receipt number and stock taken, stored as charged to the folio, with one charge on the folio for the total (tax inside, as for any sale). The folio must be open and the guest in the house. The guest pays the folio at the desk; the charge is never a payment (NN-10). Corrections are credits on the folio (S-104).
+- **Housekeeping**: a room that turns dirty gets one cleaning job. Start moves dirty to cleaning, finish moves cleaning to ready, and moving the room by hand moves the job the same way. Out of service or occupied cancels a waiting job. Maintenance jobs are notes and leave the room alone.

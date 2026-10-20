@@ -115,3 +115,7 @@ SELECT id FROM guest_folios WHERE stay_id = $1;
 
 -- name: StayStatus :one
 SELECT status FROM stays WHERE id = $1;
+
+-- name: InsertPosCharge :one
+INSERT INTO folio_items (folio_id, kind, description, amount_cents, tax_rate_bp, tax_cents, sale_id, posted_by)
+VALUES ($1, 'pos_charge', $2, $3, 0, $4, $5, $6) RETURNING id;
