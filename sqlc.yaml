@@ -47,3 +47,8 @@ sql:
     schema: [database/migrations/0002_identity.sql, database/migrations/0004_settings.sql, database/migrations/0025_rooms.sql, database/migrations/0026_stays_folios.sql, database/migrations/0028_housekeeping.sql]
     gen:
       go: { package: repository, out: internal/rooms/repository, sql_package: pgx/v5 }
+  - engine: postgresql
+    queries: database/queries/reports
+    schema: [database/migrations/0002_identity.sql, database/migrations/0004_settings.sql, database/migrations/0005_tax_treatment.sql, database/migrations/0008_catalogue.sql, database/migrations/0009_tables_orders.sql, database/migrations/0010_kitchen_tickets.sql, database/migrations/0012_sales.sql, database/migrations/0014_shifts.sql, database/migrations/0016_refunds.sql, database/migrations/0017_manual_receipts.sql, database/migrations/0018_inventory.sql, database/migrations/0019_stock_links.sql, database/migrations/0020_sale_stock_snapshot.sql, database/migrations/0025_rooms.sql, database/migrations/0026_stays_folios.sql]
+    gen:
+      go: { package: repository, out: internal/reports/repository, sql_package: pgx/v5 }
