@@ -46,7 +46,6 @@ func (h *Handler) Register(v1 *gin.RouterGroup, guard ...gin.HandlerFunc) {
 	g.POST("/transfers", transfer, idempotency.Required(), h.transfers)
 	g.POST("/wastage", wastage, idempotency.Required(), h.wastage)
 	g.POST("/movements/:id/reverse", adjust, idempotency.Required(), h.reverse)
-	h.registerPurchasing(v1, guard...)
 }
 
 func requirePermission(permission string) gin.HandlerFunc {

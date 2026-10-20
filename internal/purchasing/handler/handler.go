@@ -1,20 +1,114 @@
+// Package handler exposes the purchasing module over HTTP (docs/api/routes.csv, Stages 19 and 20).
 package handler
 
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
+	"net/netip"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
-	"zuscar/backend/internal/inventory/service"
 	"zuscar/backend/internal/platform/auth"
 	zhttp "zuscar/backend/internal/platform/http"
 	"zuscar/backend/internal/platform/idempotency"
+	"zuscar/backend/internal/purchasing/service"
 )
 
-// registerPurchasing mounts suppliers and purchases (docs/api/routes.csv, Stage 19). One permission, purchasing.manage.
-func (h *Handler) registerPurchasing(v1 *gin.RouterGroup, guard ...gin.HandlerFunc) {
+type Handler struct {
+	svc *service.Service
+	log *slog.Logger
+}
+
+func New(svc *service.Service, log *slog.Logger) *Handler { return &Handler{svc: svc, log: log} }
+
+func requirePermission(permission string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !auth.From(c).Has(permission) {
+			zhttp.WriteError(c, http.StatusForbidden, "forbidden", "You do not have permission to do this.")
+			return
+		}
+		c.Next()
+	}
+}
+
+func meta(c *gin.Context) service.Meta {
+	m := service.Meta{RequestID: zhttp.RequestIDFrom(c)}
+	if ip, err := netip.ParseAddr(c.ClientIP()); err == nil {
+		m.IP = &ip
+	}
+	return m
+}
+
+func idParam(c *gin.Context, what string) (int64, bool) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		zhttp.WriteError(c, http.StatusNotFound, "not_found", "That "+what+" does not exist.")
+		return 0, false
+	}
+	return id, true
+}
+
+func body(c *gin.Context, into any) bool {
+	dec := json.NewDecoder(c.Request.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(into); err != nil {
+		zhttp.WriteError(c, http.StatusBadRequest, "validation_failed", "The request body is not valid JSON.", zhttp.FieldError{Field: "body", Message: "invalid or unexpected JSON"})
+		return false
+	}
+	return true
+}
+
+func queryInt(c *gin.Context, name string) (int64, bool) {
+	v := c.Query(name)
+	if v == "" {
+		return 0, true
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n < 0 {
+		zhttp.WriteError(c, http.StatusBadRequest, "validation_failed", "Some fields are invalid.", zhttp.FieldError{Field: name, Message: "must be a positive whole number"})
+		return 0, false
+	}
+	return n, true
+}
+
+func replay(c *gin.Context, st *idempotency.Stored) {
+	c.Header(idempotency.ReplayHeader, "true")
+	c.Data(st.Status, "application/json; charset=utf-8", st.Body)
+}
+
+func (h *Handler) fail(c *gin.Context, err error) {
+	var verr *service.ValidationError
+	var nf *service.NotFoundError
+	var cf *service.ConflictError
+	switch {
+	case errors.Is(err, service.ErrForbidden):
+		zhttp.WriteError(c, http.StatusForbidden, "forbidden", "You do not have permission to do this.")
+	case errors.As(err, &nf):
+		zhttp.WriteError(c, http.StatusNotFound, "not_found", "That "+nf.What+" does not exist.")
+	case errors.As(err, &cf):
+		var f []zhttp.FieldError
+		if cf.Field != "" {
+			f = append(f, zhttp.FieldError{Field: cf.Field, Message: cf.Msg})
+		}
+		zhttp.WriteError(c, http.StatusConflict, cf.Code, cf.Msg, f...)
+	case errors.As(err, &verr):
+		zhttp.WriteError(c, http.StatusBadRequest, "validation_failed", "Some fields are invalid.", zhttp.FieldError{Field: verr.Field, Message: verr.Msg})
+	case errors.Is(err, idempotency.ErrKeyReused):
+		zhttp.WriteError(c, http.StatusUnprocessableEntity, "idempotency_key_reused", "This Idempotency-Key was already used for a different request. Use a new key for a new action.")
+	case errors.Is(err, idempotency.ErrInFlight):
+		c.Header("Retry-After", "1")
+		zhttp.WriteError(c, http.StatusConflict, "idempotency_conflict", "A request with this Idempotency-Key is still being processed. Try again in a moment.")
+	default:
+		h.log.Error("purchasing error", "request_id", zhttp.RequestIDFrom(c), "error", err.Error())
+		zhttp.WriteError(c, http.StatusInternalServerError, "internal_error", "Something went wrong. Please try again.")
+	}
+}
+
+// Register mounts suppliers and purchases. guard is the identity module's sign-in and CSRF middleware.
+func (h *Handler) Register(v1 *gin.RouterGroup, guard ...gin.HandlerFunc) {
 	manage := requirePermission("purchasing.manage")
 	s := v1.Group("/suppliers", guard...)
 	s.GET("", manage, h.listSuppliers)
@@ -174,11 +268,20 @@ func (h *Handler) receivePurchase(c *gin.Context) {
 	var in struct {
 		LocationID int64  `json:"location_id"`
 		InvoiceRef string `json:"invoice_ref"`
+		Lines      []struct {
+			ItemID        int64  `json:"item_id"`
+			Qty           int64  `json:"qty"`
+			UnitCostCents *int64 `json:"unit_cost_cents"`
+		} `json:"lines"`
 	}
 	if !body(c, &in) {
 		return
 	}
-	out, replayed, err := h.svc.ReceivePurchase(c.Request.Context(), auth.From(c), id, in.LocationID, in.InvoiceRef, idempotency.From(c), meta(c))
+	ri := service.ReceiveInput{LocationID: in.LocationID, InvoiceRef: in.InvoiceRef}
+	for _, l := range in.Lines {
+		ri.Lines = append(ri.Lines, service.ReceivedLine{ItemID: l.ItemID, Qty: l.Qty, UnitCostCents: l.UnitCostCents})
+	}
+	out, replayed, err := h.svc.ReceivePurchase(c.Request.Context(), auth.From(c), id, ri, idempotency.From(c), meta(c))
 	if err != nil {
 		h.fail(c, err)
 		return
