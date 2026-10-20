@@ -20,6 +20,7 @@ import (
 	"zuscar/backend/internal/platform/audit"
 	"zuscar/backend/internal/platform/auth"
 	"zuscar/backend/internal/rooms/repository"
+	salesservice "zuscar/backend/internal/sales/service"
 )
 
 var ErrForbidden = errors.New("forbidden")
@@ -41,12 +42,38 @@ type Meta struct {
 	IP        *netip.Addr
 }
 
+// Payments is what the folio needs from the sales module: money taken against a folio is a payment, never a folio row (NN-10).
+type Payments interface {
+	RecordFolioPayment(ctx context.Context, tx pgx.Tx, actor *auth.Principal, in salesservice.FolioPayment) (salesservice.PaymentRecord, error)
+	FolioPaymentTotals(ctx context.Context, tx pgx.Tx, folioID int64) (confirmed, pending int64, err error)
+	FolioPayments(ctx context.Context, tx pgx.Tx, folioID int64) ([]salesservice.PaymentRecord, error)
+}
+
 type Service struct {
 	pool *pgxpool.Pool
 	rec  audit.Recorder
+	pay  Payments
 }
 
-func New(pool *pgxpool.Pool, rec audit.Recorder) *Service { return &Service{pool: pool, rec: rec} }
+func New(pool *pgxpool.Pool, rec audit.Recorder, pay Payments) *Service {
+	return &Service{pool: pool, rec: rec, pay: pay}
+}
+
+// translate turns the sales module's errors into this module's, so callers see one set of error types.
+func translate(err error) error {
+	var v *salesservice.ValidationError
+	var c *salesservice.ConflictError
+	var n *salesservice.NotFoundError
+	switch {
+	case errors.As(err, &v):
+		return &ValidationError{Field: v.Field, Msg: v.Msg}
+	case errors.As(err, &c):
+		return &ConflictError{Code: c.Code, Field: c.Field, Msg: c.Msg}
+	case errors.As(err, &n):
+		return &NotFoundError{What: n.What}
+	}
+	return err
+}
 
 const (
 	maxRate     = 10_000_000 // cents per night (KES 100,000)

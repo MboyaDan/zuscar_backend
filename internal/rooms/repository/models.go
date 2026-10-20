@@ -34,6 +34,22 @@ type DocumentCounter struct {
 	UpdatedAt pgtype.Timestamptz
 }
 
+type FolioItem struct {
+	ID             int64
+	FolioID        int64
+	Kind           string
+	Description    string
+	AmountCents    int64
+	TaxRateBp      int32
+	TaxCents       int64
+	NightDate      pgtype.Date
+	SaleID         pgtype.Int8
+	Reason         pgtype.Text
+	ReversesItemID pgtype.Int8
+	PostedBy       int64
+	CreatedAt      pgtype.Timestamptz
+}
+
 type Guest struct {
 	ID        int64
 	FullName  string
@@ -42,6 +58,20 @@ type Guest struct {
 	Notes     pgtype.Text
 	CreatedAt pgtype.Timestamptz
 	UpdatedAt pgtype.Timestamptz
+}
+
+type GuestFolio struct {
+	ID                 int64
+	FolioNo            int64
+	StayID             pgtype.Int8
+	GuestID            int64
+	Status             string
+	WriteOffCents      int64
+	WriteOffApprovedBy pgtype.Int8
+	WriteOffReason     pgtype.Text
+	CreatedAt          pgtype.Timestamptz
+	ClosedAt           pgtype.Timestamptz
+	ClosedBy           pgtype.Int8
 }
 
 type LoginAttempt struct {
@@ -104,6 +134,16 @@ type Room struct {
 	UpdatedAt      pgtype.Timestamptz
 }
 
+type RoomStatusHistory struct {
+	ID         int64
+	RoomID     int64
+	FromStatus string
+	ToStatus   string
+	ChangedBy  int64
+	Reason     pgtype.Text
+	CreatedAt  pgtype.Timestamptz
+}
+
 type RoomType struct {
 	ID            int64
 	Name          string
@@ -127,6 +167,19 @@ type Session struct {
 	RevokeReason      pgtype.Text
 	Ip                *netip.Addr
 	UserAgent         pgtype.Text
+}
+
+type Stay struct {
+	ID            int64
+	ReservationID int64
+	RoomID        int64
+	GuestID       int64
+	Status        string
+	ExpectedOut   pgtype.Date
+	CheckedInAt   pgtype.Timestamptz
+	CheckedInBy   int64
+	CheckedOutAt  pgtype.Timestamptz
+	CheckedOutBy  pgtype.Int8
 }
 
 type SystemSetting struct {

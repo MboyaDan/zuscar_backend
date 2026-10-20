@@ -19,6 +19,8 @@ import (
 type PaymentRecord struct {
 	ID            int64      `json:"id"`
 	SaleID        *int64     `json:"sale_id"`
+	FolioID       *int64     `json:"folio_id"`
+	Purpose       string     `json:"purpose"`
 	ReceiptNo     int64      `json:"receipt_no,omitempty"`
 	Method        string     `json:"method"`
 	Status        string     `json:"status"`
@@ -237,12 +239,15 @@ func (s *Service) resolve(ctx context.Context, actor *auth.Principal, paymentID 
 		if err != nil {
 			return err
 		}
-		if !target.SaleID.Valid {
-			return &ConflictError{Code: "payment_not_on_sale", Msg: "This payment belongs to a folio; folio payments are handled with the folio."}
-		}
-		sale, err := q.LockSale(ctx, target.SaleID.Int64)
-		if err != nil {
-			return err
+		// A folio payment has no sale: its balance is worked out from the payments each time it is read, so
+		// confirming or failing it only changes the payment.
+		onFolio := target.FolioID.Valid
+		var sale repository.LockSaleRow
+		if !onFolio {
+			sale, err = q.LockSale(ctx, target.SaleID.Int64)
+			if err != nil {
+				return err
+			}
 		}
 		cur, err := q.LockPayment(ctx, paymentID)
 		if err != nil {
@@ -262,17 +267,22 @@ func (s *Service) resolve(ctx context.Context, actor *auth.Principal, paymentID 
 		if err != nil {
 			return err
 		}
-		tot, err := q.PaymentTotals(ctx, pgtype.Int8{Int64: sale.ID, Valid: true})
-		if err != nil {
-			return err
-		}
-		if ns := paymentStatus(sale.TotalCents, tot.ConfirmedCents); ns != sale.PaymentStatus {
-			if err := q.SetSalePaymentStatus(ctx, repository.SetSalePaymentStatusParams{ID: sale.ID, PaymentStatus: ns}); err != nil {
+		after := map[string]any{"status": target2, "note": note}
+		if onFolio {
+			after["folio_id"] = target.FolioID.Int64
+		} else {
+			tot, err := q.PaymentTotals(ctx, pgtype.Int8{Int64: sale.ID, Valid: true})
+			if err != nil {
 				return err
 			}
+			if ns := paymentStatus(sale.TotalCents, tot.ConfirmedCents); ns != sale.PaymentStatus {
+				if err := q.SetSalePaymentStatus(ctx, repository.SetSalePaymentStatusParams{ID: sale.ID, PaymentStatus: ns}); err != nil {
+					return err
+				}
+			}
+			after["sale_id"] = sale.ID
 		}
-		if err := s.record(ctx, tx, actor, m, action, "payment", paymentID, map[string]any{"status": cur.Status},
-			map[string]any{"status": target2, "sale_id": sale.ID, "note": note}); err != nil {
+		if err := s.record(ctx, tx, actor, m, action, "payment", paymentID, map[string]any{"status": cur.Status}, after); err != nil {
 			return err
 		}
 		out, err = s.paymentRecord(ctx, q, paymentID)
@@ -308,7 +318,7 @@ func (s *Service) paymentRecord(ctx context.Context, q *repository.Queries, id i
 	if err != nil {
 		return PaymentRecord{}, err
 	}
-	return PaymentRecord{ID: r.ID, SaleID: optID(r.SaleID.Int64), ReceiptNo: r.ReceiptNo, Method: r.Method, Status: r.Status, AmountCents: r.AmountCents, Reference: r.Reference,
+	return PaymentRecord{ID: r.ID, SaleID: optID(r.SaleID.Int64), FolioID: optID(r.FolioID.Int64), Purpose: r.Purpose, ReceiptNo: r.ReceiptNo, Method: r.Method, Status: r.Status, AmountCents: r.AmountCents, Reference: r.Reference,
 		CreatedBy: r.CreatedBy, CreatedByName: r.CreatedByName, CreatedAt: r.CreatedAt.Time, ConfirmedBy: optID(r.ConfirmedBy), ConfirmedAt: optTime(r.ConfirmedAt),
 		FailedBy: optID(r.FailedBy), FailedAt: optTime(r.FailedAt), Note: r.Note, ShiftID: optID(r.ShiftID)}, nil
 }
@@ -318,6 +328,7 @@ func (s *Service) paymentRecord(ctx context.Context, q *repository.Queries, id i
 type PaymentFilter struct {
 	Status, Method  string
 	ShiftID, SaleID int64
+	FolioID         int64
 	BeforeID        int64
 	Limit           int
 }
@@ -329,7 +340,7 @@ func (s *Service) ListPayments(ctx context.Context, actor *auth.Principal, f Pay
 		return nil, false, ErrForbidden
 	}
 	limit := clampLimit(f.Limit)
-	rows, err := repository.New(s.pool).ListPayments(ctx, repository.ListPaymentsParams{Status: f.Status, Method: f.Method, ShiftID: f.ShiftID, SaleID: f.SaleID,
+	rows, err := repository.New(s.pool).ListPayments(ctx, repository.ListPaymentsParams{Status: f.Status, Method: f.Method, ShiftID: f.ShiftID, SaleID: f.SaleID, FolioID: f.FolioID,
 		OnlyUser: ownScope(actor), BeforeID: f.BeforeID, RowLimit: limit + 1})
 	if err != nil {
 		return nil, false, err
@@ -340,7 +351,7 @@ func (s *Service) ListPayments(ctx context.Context, actor *auth.Principal, f Pay
 	}
 	out := make([]PaymentRecord, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, PaymentRecord{ID: r.ID, SaleID: optID(r.SaleID.Int64), ReceiptNo: r.ReceiptNo, Method: r.Method, Status: r.Status, AmountCents: r.AmountCents, Reference: r.Reference,
+		out = append(out, PaymentRecord{ID: r.ID, SaleID: optID(r.SaleID.Int64), FolioID: optID(r.FolioID.Int64), Purpose: r.Purpose, ReceiptNo: r.ReceiptNo, Method: r.Method, Status: r.Status, AmountCents: r.AmountCents, Reference: r.Reference,
 			CreatedBy: r.CreatedBy, CreatedByName: r.CreatedByName, CreatedAt: r.CreatedAt.Time, ConfirmedBy: optID(r.ConfirmedBy), ConfirmedAt: optTime(r.ConfirmedAt),
 			FailedBy: optID(r.FailedBy), FailedAt: optTime(r.FailedAt), Note: r.Note, ShiftID: optID(r.ShiftID)})
 	}
