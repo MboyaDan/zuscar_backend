@@ -115,7 +115,8 @@ UPDATE orders SET status = 'finalised', version = version + 1, updated_at = now(
 
 -- Stage 16: products with the tax they carry, for an outage entry (a paper receipt entered later). Sales never reads the catalogue tables itself.
 -- name: ListProductsForSale :many
-SELECT p.id, p.name, c.module, t.code AS tax_code, t.treatment AS tax_treatment, t.rate_bp AS tax_rate_bp
+SELECT p.id, p.name, c.module, t.code AS tax_code, t.treatment AS tax_treatment, t.rate_bp AS tax_rate_bp,
+       COALESCE(p.inventory_item_id, 0)::bigint AS inventory_item_id, p.stock_units_per_sale
 FROM products p
 JOIN categories c ON c.id = p.category_id
 JOIN tax_rates t ON t.id = p.tax_rate_id

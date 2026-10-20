@@ -90,7 +90,7 @@ func seedMenu(ctx context.Context, tx pgx.Tx, ir *idrepo.Queries) (int, error) {
 		}
 		for _, p := range c.products {
 			pid, err := q.CreateProduct(ctx, repository.CreateProductParams{CategoryID: cid, Module: c.module, Name: p.name,
-				Sku: pgtype.Text{String: p.sku, Valid: true}, PriceCents: p.cents, TaxRateID: taxID, KitchenRouted: p.kitchen})
+				Sku: pgtype.Text{String: p.sku, Valid: true}, PriceCents: p.cents, TaxRateID: taxID, KitchenRouted: p.kitchen, StockUnitsPerSale: 1})
 			if err != nil {
 				return 0, err
 			}

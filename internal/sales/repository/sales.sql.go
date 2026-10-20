@@ -260,8 +260,9 @@ func (q *Queries) InsertSale(ctx context.Context, arg InsertSaleParams) (int64, 
 
 const insertSaleItem = `-- name: InsertSaleItem :exec
 INSERT INTO sale_items (sale_id, order_item_id, product_id, name_snapshot, module, qty, unit_price_cents, modifiers_text, modifiers_cents,
-                        discount_cents, discount_reason, discount_approved_by, tax_code, tax_treatment, tax_rate_bp, tax_cents, line_total_cents)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+                        discount_cents, discount_reason, discount_approved_by, tax_code, tax_treatment, tax_rate_bp, tax_cents, line_total_cents,
+                        inventory_item_id, stock_units_per_sale, stock_location_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 `
 
 type InsertSaleItemParams struct {
@@ -282,6 +283,9 @@ type InsertSaleItemParams struct {
 	TaxRateBp          int32
 	TaxCents           int64
 	LineTotalCents     int64
+	InventoryItemID    pgtype.Int8
+	StockUnitsPerSale  pgtype.Int8
+	StockLocationID    pgtype.Int8
 }
 
 func (q *Queries) InsertSaleItem(ctx context.Context, arg InsertSaleItemParams) error {
@@ -303,6 +307,9 @@ func (q *Queries) InsertSaleItem(ctx context.Context, arg InsertSaleItemParams) 
 		arg.TaxRateBp,
 		arg.TaxCents,
 		arg.LineTotalCents,
+		arg.InventoryItemID,
+		arg.StockUnitsPerSale,
+		arg.StockLocationID,
 	)
 	return err
 }
@@ -493,6 +500,45 @@ func (q *Queries) ListSalePayments(ctx context.Context, saleID pgtype.Int8) ([]L
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.ConfirmedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSaleStock = `-- name: ListSaleStock :many
+SELECT id AS sale_item_id, qty, inventory_item_id, stock_units_per_sale, stock_location_id
+FROM sale_items WHERE sale_id = $1 AND inventory_item_id IS NOT NULL ORDER BY id
+`
+
+type ListSaleStockRow struct {
+	SaleItemID        int64
+	Qty               int32
+	InventoryItemID   pgtype.Int8
+	StockUnitsPerSale pgtype.Int8
+	StockLocationID   pgtype.Int8
+}
+
+func (q *Queries) ListSaleStock(ctx context.Context, saleID int64) ([]ListSaleStockRow, error) {
+	rows, err := q.db.Query(ctx, listSaleStock, saleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSaleStockRow
+	for rows.Next() {
+		var i ListSaleStockRow
+		if err := rows.Scan(
+			&i.SaleItemID,
+			&i.Qty,
+			&i.InventoryItemID,
+			&i.StockUnitsPerSale,
+			&i.StockLocationID,
 		); err != nil {
 			return nil, err
 		}

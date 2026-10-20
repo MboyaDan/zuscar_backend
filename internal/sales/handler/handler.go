@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	inventoryservice "zuscar/backend/internal/inventory/service"
 	orderservice "zuscar/backend/internal/orders/service"
 	"zuscar/backend/internal/platform/auth"
 	zhttp "zuscar/backend/internal/platform/http"
@@ -584,7 +585,13 @@ func (h *Handler) fail(c *gin.Context, err error) {
 	var fe *service.ForbiddenError
 	var onf *orderservice.NotFoundError
 	var ocf *orderservice.ConflictError
+	var icf *inventoryservice.ConflictError
+	var ive *inventoryservice.ValidationError
 	switch {
+	case errors.As(err, &icf):
+		zhttp.WriteError(c, http.StatusConflict, icf.Code, icf.Msg)
+	case errors.As(err, &ive):
+		zhttp.WriteError(c, http.StatusBadRequest, "validation_failed", "Some fields are invalid.", zhttp.FieldError{Field: ive.Field, Message: ive.Msg})
 	case errors.Is(err, service.ErrForbidden):
 		zhttp.WriteError(c, http.StatusForbidden, "forbidden", "You do not have permission to do this.")
 	case errors.As(err, &fe):

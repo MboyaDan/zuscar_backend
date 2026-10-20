@@ -6,10 +6,14 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
 )
+
+// pathParam matches any {name} placeholder in a route path ({id}, {saleId}, ...).
+var pathParam = regexp.MustCompile(`\{[A-Za-z]+\}`)
 
 func errCode(w *httptest.ResponseRecorder) string {
 	var b struct {
@@ -40,15 +44,20 @@ func TestAC10_EveryProtectedRouteDeniesWithoutPermission(t *testing.T) {
 	special := map[string]bool{"public": true, "terminal session": true, "system": true, "provider authenticity (unspecified)": true}
 	for _, r := range recs[1:] {
 		stage, _ := strconv.Atoi(r[4])
-		if stage > 11 || special[r[2]] {
+		if stage > 17 || special[r[2]] {
 			continue
 		}
 		// Stage 6 session routes (logout, change-password) would end the shared test session; their guards are
 		// covered by the stage 6 tests. Stage 7 to 11 routes and every permission-named route are checked here.
+		// A reprint is allowed by the key of the document type it reprints (receipt sales.reprint, ticket kitchen.view,
+		// bill sales.create), so it cannot be checked against the single key in the CSV; print_http_test.go covers it per type.
+		if r[0] == "POST" && strings.HasSuffix(r[1], "/reprint") {
+			continue
+		}
 		if stage < 7 && r[2] == "authenticated" {
 			continue
 		}
-		routes = append(routes, route{r[0], strings.NewReplacer("{id}", "1").Replace(r[1]), r[2]})
+		routes = append(routes, route{r[0], pathParam.ReplaceAllString(r[1], "1"), r[2]})
 	}
 	if len(routes) < 45 { // stage 7 to 10 rows
 		t.Fatalf("only %d routes read from routes.csv", len(routes))

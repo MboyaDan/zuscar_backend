@@ -18,6 +18,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	inventoryservice "zuscar/backend/internal/inventory/service"
+
 	"zuscar/backend/internal/platform/auth"
 	"zuscar/backend/internal/platform/idempotency"
 	"zuscar/backend/internal/sales/repository"
@@ -40,6 +42,8 @@ type RefundInput struct {
 	Reason  string            `json:"reason"`
 	Lines   []RefundLineInput `json:"lines"`
 	Payouts []PayoutInput     `json:"payouts"`
+	// Restock puts the refunded items back into stock. Off by default: a returned drink is usually thrown away, a returned sealed bottle is not.
+	Restock bool `json:"restock"`
 }
 
 type RefundItemView struct {
@@ -320,7 +324,7 @@ func cashOutShift(ctx context.Context, q *repository.Queries, actor *auth.Princi
 
 // record writes the correction: the refund row, the lines, the payouts, the new sale status and the audit row.
 func (s *Service) writeCorrection(ctx context.Context, tx pgx.Tx, q *repository.Queries, actor *auth.Principal, m Meta, sale repository.LockSaleForRefundRow,
-	kind, reason string, tk []taken, amount, tax int64, payouts []PayoutInput, items []repository.ListSaleItemsRow, prior map[int64]priorTake, day time.Time) (int64, error) {
+	kind, reason string, tk []taken, amount, tax int64, payouts []PayoutInput, items []repository.ListSaleItemsRow, prior map[int64]priorTake, day time.Time, restock bool) (int64, error) {
 	no, err := s.counters.NextNumber(ctx, tx, "refund")
 	if err != nil {
 		return 0, err
@@ -336,6 +340,22 @@ func (s *Service) writeCorrection(ctx context.Context, tx pgx.Tx, q *repository.
 			return 0, err
 		}
 		now[t.item.ID] = t.qty
+	}
+	if restock {
+		// Put back exactly what the sale line took, as snapshotted when it was sold (S-75).
+		snaps, err := q.ListSaleStock(ctx, sale.ID)
+		if err != nil {
+			return 0, err
+		}
+		var back []inventoryservice.StockLine
+		for _, sn := range snaps {
+			if n := now[sn.SaleItemID]; n > 0 {
+				back = append(back, inventoryservice.StockLine{ItemID: sn.InventoryItemID.Int64, LocationID: sn.StockLocationID.Int64, Units: int64(n) * sn.StockUnitsPerSale.Int64})
+			}
+		}
+		if err := s.stock.Return(ctx, tx, actor, rid, back, kind+" "+strconv.FormatInt(no, 10)); err != nil {
+			return 0, err
+		}
 	}
 	for _, p := range payouts {
 		shift := pgtype.Int8{}
@@ -475,7 +495,7 @@ func (s *Service) Refund(ctx context.Context, actor *auth.Principal, saleID int6
 					Msg: "Only " + strconv.FormatInt(max64(room[p.Method], 0), 10) + " cents can still go back by " + p.Method + " (that is what was received that way, less what was already returned)."}
 			}
 		}
-		rid, err := s.writeCorrection(ctx, tx, q, actor, m, sale, "refund", reason, tk, amount, tax, pay, items, prior, day)
+		rid, err := s.writeCorrection(ctx, tx, q, actor, m, sale, "refund", reason, tk, amount, tax, pay, items, prior, day, in.Restock)
 		if err != nil {
 			return nil, err
 		}
@@ -549,7 +569,7 @@ func (s *Service) Void(ctx context.Context, actor *auth.Principal, saleID int64,
 			}
 		}
 		sort.Slice(pay, func(i, j int) bool { return pay[i].Method < pay[j].Method })
-		rid, err := s.writeCorrection(ctx, tx, q, actor, m, sale, "void", reason, tk, amount, tax, pay, items, prior, day)
+		rid, err := s.writeCorrection(ctx, tx, q, actor, m, sale, "void", reason, tk, amount, tax, pay, items, prior, day, true)
 		if err != nil {
 			return nil, err
 		}

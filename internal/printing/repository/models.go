@@ -77,6 +77,36 @@ type DocumentCounter struct {
 	UpdatedAt pgtype.Timestamptz
 }
 
+type InventoryItem struct {
+	ID                int64
+	Name              string
+	Sku               pgtype.Text
+	BaseUnitID        int64
+	LowStockThreshold pgtype.Int8
+	Active            bool
+	CreatedAt         pgtype.Timestamptz
+	UpdatedAt         pgtype.Timestamptz
+}
+
+type InventoryMovement struct {
+	ID                 int64
+	ItemID             int64
+	LocationID         int64
+	QtyDelta           int64
+	MovementType       string
+	Reason             pgtype.Text
+	EnteredQty         pgtype.Int8
+	EnteredUnitID      pgtype.Int8
+	UnitCostCents      pgtype.Int8
+	RefType            pgtype.Text
+	RefID              pgtype.Int8
+	TransferGroup      pgtype.UUID
+	ReversesMovementID pgtype.Int8
+	OverrideReason     pgtype.Text
+	CreatedBy          int64
+	CreatedAt          pgtype.Timestamptz
+}
+
 type KitchenTicket struct {
 	ID             int64
 	OrderID        int64
@@ -214,17 +244,20 @@ type PrintJob struct {
 }
 
 type Product struct {
-	ID            int64
-	CategoryID    int64
-	Module        string
-	Name          string
-	Sku           pgtype.Text
-	PriceCents    int64
-	TaxRateID     int64
-	IsAvailable   bool
-	KitchenRouted bool
-	CreatedAt     pgtype.Timestamptz
-	UpdatedAt     pgtype.Timestamptz
+	ID                int64
+	CategoryID        int64
+	Module            string
+	Name              string
+	Sku               pgtype.Text
+	PriceCents        int64
+	TaxRateID         int64
+	IsAvailable       bool
+	KitchenRouted     bool
+	CreatedAt         pgtype.Timestamptz
+	UpdatedAt         pgtype.Timestamptz
+	TrackStock        bool
+	InventoryItemID   pgtype.Int8
+	StockUnitsPerSale int64
 }
 
 type ProductModifier struct {
@@ -288,6 +321,9 @@ type SaleItem struct {
 	TaxRateBp          int32
 	TaxCents           int64
 	LineTotalCents     int64
+	InventoryItemID    pgtype.Int8
+	StockUnitsPerSale  pgtype.Int8
+	StockLocationID    pgtype.Int8
 }
 
 type Session struct {
@@ -302,6 +338,22 @@ type Session struct {
 	RevokeReason      pgtype.Text
 	Ip                *netip.Addr
 	UserAgent         pgtype.Text
+}
+
+type StockBalance struct {
+	ItemID         int64
+	LocationID     int64
+	QtyBase        int64
+	Movements      int64
+	LastMovementAt interface{}
+}
+
+type StockLocation struct {
+	ID        int64
+	Code      string
+	Name      string
+	Active    bool
+	CreatedAt pgtype.Timestamptz
 }
 
 type SystemSetting struct {
@@ -328,6 +380,22 @@ type TicketStatusHistory struct {
 	ToStatus   string
 	ChangedBy  int64
 	ChangedAt  pgtype.Timestamptz
+}
+
+type UnitConversion struct {
+	ID         int64
+	ItemID     int64
+	FromUnitID int64
+	ToUnitID   int64
+	FactorNum  int64
+	FactorDen  int64
+}
+
+type UnitsOfMeasure struct {
+	ID        int64
+	Code      string
+	Name      string
+	CreatedAt pgtype.Timestamptz
 }
 
 type User struct {

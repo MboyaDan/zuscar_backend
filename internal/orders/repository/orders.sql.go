@@ -486,7 +486,8 @@ func (q *Queries) ListOrders(ctx context.Context, arg ListOrdersParams) ([]ListO
 }
 
 const listProductsForSale = `-- name: ListProductsForSale :many
-SELECT p.id, p.name, c.module, t.code AS tax_code, t.treatment AS tax_treatment, t.rate_bp AS tax_rate_bp
+SELECT p.id, p.name, c.module, t.code AS tax_code, t.treatment AS tax_treatment, t.rate_bp AS tax_rate_bp,
+       COALESCE(p.inventory_item_id, 0)::bigint AS inventory_item_id, p.stock_units_per_sale
 FROM products p
 JOIN categories c ON c.id = p.category_id
 JOIN tax_rates t ON t.id = p.tax_rate_id
@@ -494,12 +495,14 @@ WHERE p.id = ANY($1::bigint[])
 `
 
 type ListProductsForSaleRow struct {
-	ID           int64
-	Name         string
-	Module       string
-	TaxCode      string
-	TaxTreatment string
-	TaxRateBp    int32
+	ID                int64
+	Name              string
+	Module            string
+	TaxCode           string
+	TaxTreatment      string
+	TaxRateBp         int32
+	InventoryItemID   int64
+	StockUnitsPerSale int64
 }
 
 // Stage 16: products with the tax they carry, for an outage entry (a paper receipt entered later). Sales never reads the catalogue tables itself.
@@ -519,6 +522,8 @@ func (q *Queries) ListProductsForSale(ctx context.Context, dollar_1 []int64) ([]
 			&i.TaxCode,
 			&i.TaxTreatment,
 			&i.TaxRateBp,
+			&i.InventoryItemID,
+			&i.StockUnitsPerSale,
 		); err != nil {
 			return nil, err
 		}

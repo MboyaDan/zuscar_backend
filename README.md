@@ -4,7 +4,7 @@ Go API for Zuscar, a hospitality POS and operations system for one Kenyan venue.
 
 Project documents (requirements brief, architecture, ADRs, schema, RBAC, API plan, progress, assumptions) live in `docs/` here. Start with `docs/PROGRESS.md`.
 
-**Status: Stage 16.** The API covers sign-in and roles, settings and tax, the catalogue (menu, prices, modifiers), tables and orders, kitchen tickets, sales with payments, cashier shifts, receipt and ticket printing, voids and refunds, and outage reconciliation (paper receipts entered after a system outage). Rooms, folios, stock, purchasing, reports and the payment-provider integrations come in later stages (`docs/PROGRESS.md` has the plan and what each stage did). The web screens live in the separate frontend repository.
+**Status: Stage 17.** The API covers sign-in and roles, settings and tax, the catalogue (menu, prices, modifiers), tables and orders, kitchen tickets, sales with payments, cashier shifts, receipt and ticket printing, voids and refunds, outage reconciliation (paper receipts entered after a system outage), and stock (items, units and conversions, places, an append-only movement ledger, opening balances, adjustments and reversals, and sales that take stock). Rooms, folios, transfers, wastage, purchasing, stock counts, reports and the payment-provider integrations come in later stages (`docs/PROGRESS.md` has the plan and what each stage did). The web screens live in the separate frontend repository.
 
 ## Run it locally (everything in Docker)
 
@@ -65,7 +65,7 @@ The API reads everything from environment variables (`internal/platform/config`)
 4. Copy the Render service URL into the frontend's `BACKEND_URL` on Vercel and redeploy the frontend.
 
 ## Layout
-`cmd/` (api, migrate, bootstrap, seed-dev) · `internal/` (platform, identity, settings, catalogue, orders, sales, printing, provision, devseed) · `database/migrations` (SQL, applied in order) · `database/queries` (sqlc) · `docs/` · `scripts/sandbox` (authoring-sandbox helpers only, ignore).
+`cmd/` (api, migrate, bootstrap, seed-dev) · `internal/` (platform, identity, settings, catalogue, orders, inventory, sales, printing, provision, devseed) · `database/migrations` (SQL, applied in order) · `database/queries` (sqlc) · `docs/` · `scripts/sandbox` (authoring-sandbox helpers only, ignore).
 
 ## Dependencies and why
 `gin-gonic/gin` (HTTP router, mandated by the brief) · `jackc/pgx/v5` (PostgreSQL driver and pool, mandated) · `golang.org/x/crypto` (Argon2id password hashing) · `golang.org/x/term` (hidden password prompt in `bootstrap`). Generated repository code comes from sqlc (`make sqlc`, not a runtime dependency).

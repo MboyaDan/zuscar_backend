@@ -1046,7 +1046,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: {type: object, required: [category_id, name, price_cents, tax_rate_id, kitchen_routed], properties: {category_id: {type: integer, format: int64}, name: {type: string}, sku: {type: string}, price_cents: {type: integer, format: int64, minimum: 0}, tax_rate_id: {type: integer, format: int64}, kitchen_routed: {type: boolean}, modifier_ids: {type: array, items: {type: integer, format: int64}}}}
+            schema: {type: object, required: [category_id, name, price_cents, tax_rate_id, kitchen_routed], properties: {category_id: {type: integer, format: int64}, name: {type: string}, sku: {type: string}, price_cents: {type: integer, format: int64, minimum: 0}, tax_rate_id: {type: integer, format: int64}, kitchen_routed: {type: boolean}, modifier_ids: {type: array, items: {type: integer, format: int64}}, inventory_item_id: {type: integer, format: int64, nullable: true}, stock_units_per_sale: {type: integer, format: int64, minimum: 1}, inventory_item_id: {type: integer, format: int64, nullable: true, description: 'Stock link. null stops tracking.'}, stock_units_per_sale: {type: integer, format: int64, minimum: 1}}}
       responses:
         '201':
           description: OK
@@ -1069,7 +1069,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: {type: object, properties: {category_id: {type: integer, format: int64}, name: {type: string}, sku: {type: string}, tax_rate_id: {type: integer, format: int64}, kitchen_routed: {type: boolean}, modifier_ids: {type: array, items: {type: integer, format: int64}}}}
+            schema: {type: object, properties: {category_id: {type: integer, format: int64}, name: {type: string}, sku: {type: string}, tax_rate_id: {type: integer, format: int64}, kitchen_routed: {type: boolean}, modifier_ids: {type: array, items: {type: integer, format: int64}}, inventory_item_id: {type: integer, format: int64, nullable: true, description: 'Stock link. null stops tracking.'}, stock_units_per_sale: {type: integer, format: int64, minimum: 1}}}
       responses:
         '200':
           description: OK
@@ -1653,7 +1653,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: {type: object, required: [reason, lines, payouts], properties: {reason: {type: string, minLength: 1, maxLength: 200}, lines: {type: array, items: {type: object, required: [sale_item_id, qty], properties: {sale_item_id: {type: integer, format: int64}, qty: {type: integer, minimum: 1}}}}, payouts: {type: array, items: {type: object, required: [method, amount_cents], properties: {method: {type: string, enum: [cash, mpesa_manual, card_manual, bank_manual]}, amount_cents: {type: integer, format: int64}, reference: {type: string, maxLength: 64}}}}}}
+            schema: {type: object, required: [reason, lines, payouts], properties: {restock: {type: boolean, description: 'Put the refunded items back into stock (default false). A void always puts everything back.'}, reason: {type: string, minLength: 1, maxLength: 200}, lines: {type: array, items: {type: object, required: [sale_item_id, qty], properties: {sale_item_id: {type: integer, format: int64}, qty: {type: integer, minimum: 1}}}}, payouts: {type: array, items: {type: object, required: [method, amount_cents], properties: {method: {type: string, enum: [cash, mpesa_manual, card_manual, bank_manual]}, amount_cents: {type: integer, format: int64}, reference: {type: string, maxLength: 64}}}}}}
       responses:
         '201':
           description: Created
@@ -2137,6 +2137,229 @@ paths:
         '401': *id001
         '403': *id001
         '404': *id001
+        '409': *id001
+  /api/v1/inventory/units:
+    get:
+      summary: List units of measure
+      description: 'Needs inventory.view. Piece (pc), millilitre (ml) and gram (g) are seeded. Bottles, crates and shots are not units of the code: they are conversions per item.'
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+    post:
+      summary: Add a unit
+      description: 'Needs inventory.adjust. code is lower case letters, digits and underscore, 1 to 16 characters.'
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [code, name], properties: {code: {type: string}, name: {type: string}}}
+      responses:
+        '201':
+          description: Created
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '409': *id001
+  /api/v1/inventory/locations:
+    get:
+      summary: List stock locations
+      description: 'Needs inventory.view. Main store, Bar and Kitchen are seeded. A sale takes bar products from the bar and everything else from the kitchen (S-72).'
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+    post:
+      summary: Add a stock location
+      description: 'Needs inventory.adjust.'
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [code, name], properties: {code: {type: string}, name: {type: string}}}
+      responses:
+        '201':
+          description: Created
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '409': *id001
+  /api/v1/inventory/items:
+    get:
+      summary: List inventory items
+      description: 'Needs inventory.view. Each item carries its total in base units, a low flag when the total is at or under its low-stock level, its conversions and its balance per location. q searches by name or SKU; active=true hides switched-off items.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: q, in: query, schema: {type: string}}
+      - {name: active, in: query, schema: {type: boolean}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+    post:
+      summary: Add an inventory item
+      description: 'Needs inventory.adjust. The base unit cannot be changed afterwards. Names and SKUs are unique ignoring case (409).'
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [name, base_unit_id], properties: {name: {type: string}, sku: {type: string}, base_unit_id: {type: integer, format: int64}, low_stock_threshold: {type: integer, format: int64, nullable: true}}}
+      responses:
+        '201':
+          description: Created
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '409': *id001
+  /api/v1/inventory/items/{id}:
+    patch:
+      summary: Change an inventory item
+      description: 'Needs inventory.adjust. name, sku (empty clears it), low_stock_threshold (null clears it) and active. Stock is never changed here.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, properties: {name: {type: string}, sku: {type: string}, low_stock_threshold: {type: integer, format: int64, nullable: true}, active: {type: boolean}}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '409': *id001
+  /api/v1/inventory/items/{id}/conversions:
+    put:
+      summary: Replace an items conversions
+      description: 'Needs inventory.adjust. Replaces every conversion of the item. factor_num / factor_den base units per unit (factor_den defaults to 1), for example 1 crate = 24 pieces. A conversion always ends in the item base unit.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [conversions], properties: {conversions: {type: array, items: {type: object, required: [unit_id, factor_num], properties: {unit_id: {type: integer, format: int64}, factor_num: {type: integer, format: int64}, factor_den: {type: integer, format: int64}}}}}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+  /api/v1/inventory/balances:
+    get:
+      summary: Stock balances
+      description: 'Needs inventory.view. Always worked out from the ledger (sum of movements per item and location); nothing is stored.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: item_id, in: query, schema: {type: integer, format: int64}}
+      - {name: location_id, in: query, schema: {type: integer, format: int64}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+  /api/v1/inventory/movements:
+    get:
+      summary: Stock movements
+      description: 'Needs inventory.view. Newest first; page with before_id and limit. Each row says what it is, who made it, what the person typed, whether it was reversed and any override reason.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: item_id, in: query, schema: {type: integer, format: int64}}
+      - {name: location_id, in: query, schema: {type: integer, format: int64}}
+      - {name: before_id, in: query, schema: {type: integer, format: int64}}
+      - {name: limit, in: query, schema: {type: integer, format: int64}}
+      - {name: type, in: query, schema: {type: string}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+  /api/v1/inventory/opening-balances:
+    post:
+      summary: Set opening stock
+      description: 'Needs inventory.adjust and the Idempotency-Key header. One opening balance per item and location (409 opening_exists); after that stock moves by adjustments, counts, receipts and sales. Quantities may be typed in any unit the item has a conversion for and must come to a whole number of base units.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: Idempotency-Key, in: header, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [location_id, lines], properties: {location_id: {type: integer, format: int64}, note: {type: string}, lines: {type: array, items: {type: object, required: [item_id, qty], properties: {item_id: {type: integer, format: int64}, qty: {type: integer, format: int64}, unit_id: {type: integer, format: int64}}}}}}
+      responses:
+        '201':
+          description: Created
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '409': *id001
+  /api/v1/inventory/adjustments:
+    post:
+      summary: Adjust stock with a reason
+      description: 'Needs inventory.adjust and the Idempotency-Key header. qty is positive to add and negative to take away. A reason of 1 to 200 characters is required. Taking stock below zero answers 409 negative_stock unless override_negative is true with an override_reason, which needs inventory.override_negative (403 override_not_permitted). Under the block policy it is always 409 insufficient_stock.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: Idempotency-Key, in: header, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [item_id, location_id, qty, reason], properties: {item_id: {type: integer, format: int64}, location_id: {type: integer, format: int64}, qty: {type: integer, format: int64}, unit_id: {type: integer, format: int64}, reason: {type: string}, override_negative: {type: boolean}, override_reason: {type: string}}}
+      responses:
+        '201':
+          description: Created
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '409': *id001
+  /api/v1/inventory/movements/{id}/reverse:
+    post:
+      summary: Reverse a movement
+      description: 'Needs inventory.adjust and the Idempotency-Key header. Writes an exact opposite movement that points at the original; the original is never changed. 409 already_reversed, or not_reversible for sales, transfers and reversals (a sale is corrected by a void or refund). The same negative-stock rules as an adjustment apply.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: Idempotency-Key, in: header, required: true, schema: {type: string}}
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [reason], properties: {reason: {type: string}, override_negative: {type: boolean}, override_reason: {type: string}}}
+      responses:
+        '201':
+          description: Created
+        '400': *id001
+        '401': *id001
+        '403': *id001
         '409': *id001
 components:
   securitySchemes:

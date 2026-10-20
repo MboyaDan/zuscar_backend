@@ -186,13 +186,15 @@ func (h *Handler) listProducts(c *gin.Context) {
 
 func (h *Handler) createProduct(c *gin.Context) {
 	var in struct {
-		CategoryID    *int64  `json:"category_id"`
-		Name          string  `json:"name"`
-		SKU           string  `json:"sku"`
-		PriceCents    *int64  `json:"price_cents"`
-		TaxRateID     *int64  `json:"tax_rate_id"`
-		KitchenRouted *bool   `json:"kitchen_routed"`
-		ModifierIDs   []int64 `json:"modifier_ids"`
+		CategoryID        *int64  `json:"category_id"`
+		Name              string  `json:"name"`
+		SKU               string  `json:"sku"`
+		PriceCents        *int64  `json:"price_cents"`
+		TaxRateID         *int64  `json:"tax_rate_id"`
+		KitchenRouted     *bool   `json:"kitchen_routed"`
+		ModifierIDs       []int64 `json:"modifier_ids"`
+		InventoryItemID   *int64  `json:"inventory_item_id"`
+		StockUnitsPerSale int64   `json:"stock_units_per_sale"`
 	}
 	if !decode(c, &in) {
 		return
@@ -215,7 +217,7 @@ func (h *Handler) createProduct(c *gin.Context) {
 		return
 	}
 	out, err := h.svc.CreateProduct(c.Request.Context(), auth.From(c), service.NewProduct{CategoryID: *in.CategoryID, Name: in.Name, SKU: in.SKU,
-		PriceCents: *in.PriceCents, TaxRateID: *in.TaxRateID, KitchenRouted: *in.KitchenRouted, ModifierIDs: in.ModifierIDs}, meta(c))
+		PriceCents: *in.PriceCents, TaxRateID: *in.TaxRateID, KitchenRouted: *in.KitchenRouted, ModifierIDs: in.ModifierIDs, InventoryItemID: in.InventoryItemID, StockUnitsPerSale: in.StockUnitsPerSale}, meta(c))
 	if err != nil {
 		h.fail(c, err)
 		return
@@ -236,16 +238,27 @@ func (h *Handler) updateProduct(c *gin.Context) {
 		TaxRateID     *int64   `json:"tax_rate_id"`
 		KitchenRouted *bool    `json:"kitchen_routed"`
 		ModifierIDs   *[]int64 `json:"modifier_ids"`
+		// absent = unchanged, null = stop tracking stock, a number = link to that inventory item
+		InventoryItemID   json.RawMessage `json:"inventory_item_id"`
+		StockUnitsPerSale *int64          `json:"stock_units_per_sale"`
 	}
 	if !decode(c, &in) {
 		return
 	}
-	if in.CategoryID == nil && in.Name == nil && in.SKU == nil && in.TaxRateID == nil && in.KitchenRouted == nil && in.ModifierIDs == nil {
+	var invItem service.NullableID
+	if len(in.InventoryItemID) > 0 {
+		invItem.Set = true
+		if err := json.Unmarshal(in.InventoryItemID, &invItem.Value); err != nil {
+			zhttp.WriteError(c, http.StatusBadRequest, "validation_failed", "Some fields are invalid.", zhttp.FieldError{Field: "inventory_item_id", Message: "must be a number or null"})
+			return
+		}
+	}
+	if in.CategoryID == nil && in.Name == nil && in.SKU == nil && in.TaxRateID == nil && in.KitchenRouted == nil && in.ModifierIDs == nil && !invItem.Set && in.StockUnitsPerSale == nil {
 		zhttp.WriteError(c, http.StatusBadRequest, "validation_failed", "Some fields are invalid.", zhttp.FieldError{Field: "body", Message: "give at least one field to change (price and availability have their own endpoints)"})
 		return
 	}
 	out, err := h.svc.UpdateProduct(c.Request.Context(), auth.From(c), id, service.ProductChange{CategoryID: in.CategoryID, Name: in.Name, SKU: in.SKU,
-		TaxRateID: in.TaxRateID, KitchenRouted: in.KitchenRouted, ModifierIDs: in.ModifierIDs}, meta(c))
+		TaxRateID: in.TaxRateID, KitchenRouted: in.KitchenRouted, ModifierIDs: in.ModifierIDs, InventoryItem: invItem, StockUnitsPerSale: in.StockUnitsPerSale}, meta(c))
 	if err != nil {
 		h.fail(c, err)
 		return
