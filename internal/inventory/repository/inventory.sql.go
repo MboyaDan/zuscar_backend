@@ -256,8 +256,8 @@ func (q *Queries) InsertLocation(ctx context.Context, arg InsertLocationParams) 
 }
 
 const insertMovement = `-- name: InsertMovement :one
-INSERT INTO inventory_movements (item_id, location_id, qty_delta, movement_type, reason, entered_qty, entered_unit_id, unit_cost_cents, ref_type, ref_id, reverses_movement_id, override_reason, created_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id
+INSERT INTO inventory_movements (item_id, location_id, qty_delta, movement_type, reason, entered_qty, entered_unit_id, unit_cost_cents, ref_type, ref_id, reverses_movement_id, override_reason, created_by, transfer_group)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::uuid) RETURNING id
 `
 
 type InsertMovementParams struct {
@@ -274,6 +274,7 @@ type InsertMovementParams struct {
 	ReversesMovementID pgtype.Int8
 	OverrideReason     pgtype.Text
 	CreatedBy          int64
+	TransferGroup      pgtype.UUID
 }
 
 func (q *Queries) InsertMovement(ctx context.Context, arg InsertMovementParams) (int64, error) {
@@ -291,6 +292,7 @@ func (q *Queries) InsertMovement(ctx context.Context, arg InsertMovementParams) 
 		arg.ReversesMovementID,
 		arg.OverrideReason,
 		arg.CreatedBy,
+		arg.TransferGroup,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -788,6 +790,17 @@ func (q *Queries) MovementReversed(ctx context.Context, reversesMovementID pgtyp
 	var reversed bool
 	err := row.Scan(&reversed)
 	return reversed, err
+}
+
+const newTransferGroup = `-- name: NewTransferGroup :one
+SELECT gen_random_uuid()::uuid AS id
+`
+
+func (q *Queries) NewTransferGroup(ctx context.Context) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, newTransferGroup)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const updateItem = `-- name: UpdateItem :exec

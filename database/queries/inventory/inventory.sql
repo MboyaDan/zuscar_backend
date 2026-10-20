@@ -77,8 +77,11 @@ SELECT item_id, location_id, qty_base FROM stock_balances WHERE item_id = ANY($1
 SELECT COALESCE(sum(qty_delta), 0)::bigint AS qty_base FROM inventory_movements WHERE item_id = $1 AND location_id = $2;
 
 -- name: InsertMovement :one
-INSERT INTO inventory_movements (item_id, location_id, qty_delta, movement_type, reason, entered_qty, entered_unit_id, unit_cost_cents, ref_type, ref_id, reverses_movement_id, override_reason, created_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id;
+INSERT INTO inventory_movements (item_id, location_id, qty_delta, movement_type, reason, entered_qty, entered_unit_id, unit_cost_cents, ref_type, ref_id, reverses_movement_id, override_reason, created_by, transfer_group)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, sqlc.narg('transfer_group')::uuid) RETURNING id;
+
+-- name: NewTransferGroup :one
+SELECT gen_random_uuid()::uuid AS id;
 
 -- name: GetMovement :one
 SELECT id, item_id, location_id, qty_delta, movement_type FROM inventory_movements WHERE id = $1;

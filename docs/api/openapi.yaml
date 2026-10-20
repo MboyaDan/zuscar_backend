@@ -2361,6 +2361,46 @@ paths:
         '401': *id001
         '403': *id001
         '409': *id001
+  /api/v1/inventory/transfers:
+    post:
+      summary: Move stock between places
+      description: 'Needs inventory.transfer and the Idempotency-Key header. Writes two movements that share a group, moved out and moved in, in one transaction. The two places must differ and be active; the source may not go below zero without override_negative and an override_reason (inventory.override_negative), and never under the block policy. 409 negative_stock, insufficient_stock, item_inactive; 403 override_not_permitted. A transfer is not reversed: move the stock back.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: Idempotency-Key, in: header, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [item_id, from_location_id, to_location_id, qty], properties: {item_id: {type: integer, format: int64}, from_location_id: {type: integer, format: int64}, to_location_id: {type: integer, format: int64}, qty: {type: integer, format: int64, minimum: 1}, unit_id: {type: integer, format: int64}, note: {type: string, maxLength: 200}, override_negative: {type: boolean}, override_reason: {type: string}}}
+      responses:
+        '201':
+          description: Created
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '409': *id001
+  /api/v1/inventory/wastage:
+    post:
+      summary: Record wastage, breakage or complimentary stock
+      description: 'Needs inventory.wastage and the Idempotency-Key header. Always a reduction, always with a reason of 1 to 200 characters. kind is wastage (spoiled), breakage (dropped or broken) or complimentary (given away). The same below-zero rules as an adjustment apply. A mistaken entry is undone with a reversal.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: Idempotency-Key, in: header, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [item_id, location_id, kind, qty, reason], properties: {item_id: {type: integer, format: int64}, location_id: {type: integer, format: int64}, kind: {type: string, enum: [wastage, breakage, complimentary]}, qty: {type: integer, format: int64, minimum: 1}, unit_id: {type: integer, format: int64}, reason: {type: string, maxLength: 200}, override_negative: {type: boolean}, override_reason: {type: string}}}
+      responses:
+        '201':
+          description: Created
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '409': *id001
 components:
   securitySchemes:
     sessionCookie:

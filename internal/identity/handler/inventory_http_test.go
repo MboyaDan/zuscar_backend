@@ -456,3 +456,142 @@ func TestAC06_PermissionsAndIdempotency(t *testing.T) {
 	// A product cannot be linked to an item that does not exist.
 	v.call(v.mgr, "PATCH", "/api/v1/products/"+itoa(v.tea), map[string]any{"inventory_item_id": 99999}, 400, "validation_failed")
 }
+
+// ---- Stage 18: transfers and wastage (AC-06, S-78 to S-80) ----
+
+func (v *invEnv) transfer(j jar, item, from, to, qty int64, extra map[string]any, want int, errCode string) *httptest.ResponseRecorder {
+	v.t.Helper()
+	b := map[string]any{"item_id": item, "from_location_id": from, "to_location_id": to, "qty": qty}
+	for k, x := range extra {
+		b[k] = x
+	}
+	w := v.e.do(req{method: "POST", path: "/api/v1/inventory/transfers", jar: j, header: map[string]string{"Idempotency-Key": newKey()}, body: b})
+	expect(v.t, w, want, errCode)
+	return w
+}
+
+func (v *invEnv) waste(j jar, item, loc int64, kind string, qty int64, extra map[string]any, want int, errCode string) {
+	v.t.Helper()
+	b := map[string]any{"item_id": item, "location_id": loc, "kind": kind, "qty": qty, "reason": "dropped crate"}
+	for k, x := range extra {
+		b[k] = x
+	}
+	w := v.e.do(req{method: "POST", path: "/api/v1/inventory/wastage", jar: j, header: map[string]string{"Idempotency-Key": newKey()}, body: b})
+	expect(v.t, w, want, errCode)
+}
+
+func TestAC06_TransferPairsNetToZero(t *testing.T) {
+	v := newInvEnv(t)
+	v.e.addUser("barman", false, "bartender")
+	bj := v.e.mustLogin("barman")
+	it := v.item("Lager crate stock", v.pc)
+	v.opening(it, v.mainStore, 100)
+	v.transfer(bj, it, v.mainStore, v.bar, 30, map[string]any{"note": "weekend stock"}, 201, "")
+	if v.balance(it, v.mainStore) != 70 || v.balance(it, v.bar) != 30 {
+		t.Fatalf("main %d (want 70), bar %d (want 30)", v.balance(it, v.mainStore), v.balance(it, v.bar))
+	}
+	// Two rows, one group, summing to zero.
+	if n := v.e.count(`SELECT count(*) FROM (SELECT transfer_group FROM inventory_movements WHERE transfer_group IS NOT NULL GROUP BY transfer_group HAVING sum(qty_delta) = 0 AND count(*) = 2) g`); n != 1 {
+		t.Fatalf("%d balanced groups, want 1", n)
+	}
+	// The same transfer sent twice with one key moves stock once.
+	key := newKey()
+	body := map[string]any{"item_id": it, "from_location_id": v.mainStore, "to_location_id": v.bar, "qty": 10}
+	for i := 0; i < 2; i++ {
+		w := v.e.do(req{method: "POST", path: "/api/v1/inventory/transfers", jar: bj, header: map[string]string{"Idempotency-Key": key}, body: body})
+		expect(t, w, 201, "")
+	}
+	if v.balance(it, v.mainStore) != 60 || v.balance(it, v.bar) != 40 {
+		t.Fatalf("retry moved stock twice: main %d bar %d", v.balance(it, v.mainStore), v.balance(it, v.bar))
+	}
+	// The database refuses a lopsided pair even if the service did not: one leg alone, or unequal legs.
+	if _, err := v.e.pool.Exec(t.Context(), `INSERT INTO inventory_movements (item_id, location_id, qty_delta, movement_type, transfer_group, created_by)
+		SELECT $1, $2, -5, 'transfer_out', gen_random_uuid(), id FROM users LIMIT 1`, it, v.mainStore); err == nil {
+		t.Fatal("a single transfer leg was accepted")
+	}
+	// A transfer movement cannot be reversed; it is undone by moving the stock back.
+	var outID int64
+	if err := v.e.pool.QueryRow(t.Context(), `SELECT id FROM inventory_movements WHERE movement_type = 'transfer_out' LIMIT 1`).Scan(&outID); err != nil {
+		t.Fatal(err)
+	}
+	v.call(v.store, "POST", "/api/v1/inventory/movements/"+itoa(outID)+"/reverse", map[string]any{"reason": "x"}, 409, "not_reversible")
+}
+
+func TestAC06_TransferRules(t *testing.T) {
+	v := newInvEnv(t)
+	it := v.item("Glasses", v.pc)
+	v.opening(it, v.mainStore, 10)
+	v.transfer(v.store, it, v.mainStore, v.mainStore, 1, nil, 400, "validation_failed") // same place
+	v.transfer(v.store, it, v.mainStore, v.bar, 11, nil, 409, "negative_stock")         // more than is there
+	v.transfer(v.store, it, v.mainStore, 99999, 1, nil, 400, "validation_failed")       // no such place
+	v.transfer(v.cash, it, v.mainStore, v.bar, 1, nil, 403, "forbidden")                // cashier
+	v.transfer(v.cook, it, v.mainStore, v.bar, 1, nil, 403, "forbidden")                // kitchen staff may record wastage, not move stock
+	if v.balance(it, v.mainStore) != 10 || v.balance(it, v.bar) != 0 {
+		t.Fatal("a refused transfer changed stock")
+	}
+	// Override from a manager is recorded on the leg that leaves.
+	v.transfer(v.mgr, it, v.mainStore, v.bar, 11, map[string]any{"override_negative": true, "override_reason": "count tomorrow"}, 201, "")
+	if v.balance(it, v.mainStore) != -1 || v.balance(it, v.bar) != 11 {
+		t.Fatalf("main %d bar %d", v.balance(it, v.mainStore), v.balance(it, v.bar))
+	}
+	// Under the block policy nobody may.
+	v.e.exec(`UPDATE system_settings SET value = '"block"' WHERE key = 'negative_stock_policy'`)
+	v.transfer(v.mgr, it, v.mainStore, v.bar, 1, map[string]any{"override_negative": true, "override_reason": "x"}, 409, "insufficient_stock")
+}
+
+func TestAC06_ConcurrentTransfersNeverOverdraw(t *testing.T) {
+	v := newInvEnv(t)
+	it := v.item("Napkin packs", v.pc)
+	v.opening(it, v.mainStore, 5)
+	codes := make([]int, 12)
+	var wg sync.WaitGroup
+	for i := range codes {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			w := v.e.do(req{method: "POST", path: "/api/v1/inventory/transfers", jar: v.store, header: map[string]string{"Idempotency-Key": newKey()},
+				body: map[string]any{"item_id": it, "from_location_id": v.mainStore, "to_location_id": v.bar, "qty": 1}})
+			codes[i] = w.Code
+		}()
+	}
+	wg.Wait()
+	ok := 0
+	for _, c := range codes {
+		if c == 201 {
+			ok++
+		}
+	}
+	if ok != 5 || v.balance(it, v.mainStore) != 0 || v.balance(it, v.bar) != 5 {
+		t.Fatalf("%d transfers went through (want 5), main %d bar %d: %v", ok, v.balance(it, v.mainStore), v.balance(it, v.bar), codes)
+	}
+}
+
+func TestAC06_WastageBreakageComplimentary(t *testing.T) {
+	v := newInvEnv(t)
+	it := v.item("Whisky", v.ml)
+	v.opening(it, v.bar, 1000)
+	v.waste(v.cook, it, v.bar, "wastage", 100, nil, 201, "") // kitchen staff hold inventory.wastage
+	v.waste(v.store, it, v.bar, "breakage", 200, nil, 201, "")
+	v.waste(v.mgr, it, v.bar, "complimentary", 50, nil, 201, "")
+	if v.balance(it, v.bar) != 650 {
+		t.Fatalf("balance %d, want 650", v.balance(it, v.bar))
+	}
+	for _, typ := range []string{"wastage", "breakage", "complimentary"} {
+		if v.e.count(`SELECT count(*) FROM inventory_movements WHERE movement_type = $1 AND qty_delta < 0 AND reason IS NOT NULL`, typ) != 1 {
+			t.Fatalf("no %s movement with a reason", typ)
+		}
+	}
+	v.waste(v.cash, it, v.bar, "wastage", 1, nil, 403, "forbidden")
+	v.waste(v.mgr, it, v.bar, "sale_consumption", 1, nil, 400, "validation_failed")
+	v.waste(v.mgr, it, v.bar, "wastage", 1, map[string]any{"reason": "  "}, 400, "validation_failed")
+	v.waste(v.mgr, it, v.bar, "wastage", 651, nil, 409, "negative_stock")
+	// Wastage recorded by mistake is undone with a reversal, not by editing.
+	var id int64
+	if err := v.e.pool.QueryRow(t.Context(), `SELECT id FROM inventory_movements WHERE movement_type = 'wastage'`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	v.call(v.store, "POST", "/api/v1/inventory/movements/"+itoa(id)+"/reverse", map[string]any{"reason": "wrong item"}, 201, "")
+	if v.balance(it, v.bar) != 750 {
+		t.Fatalf("balance %d after reversing wastage, want 750", v.balance(it, v.bar))
+	}
+}
