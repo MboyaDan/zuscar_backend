@@ -100,6 +100,9 @@ func TestSeedAddsSampleMenuOnceAndConsistently(t *testing.T) {
 	if count(`SELECT count(*) FROM dining_tables WHERE active`) != 6 {
 		t.Fatal("seed-dev should add six dining tables")
 	}
+	if count(`SELECT count(*) FROM rooms WHERE active`) != 13 || count(`SELECT count(*) FROM room_types`) != 3 {
+		t.Fatal("seed-dev should add three room types and thirteen rooms")
+	}
 	// A repeat run (even after someone edits the menu) adds and changes nothing.
 	if _, err := pool.Exec(ctx, `UPDATE products SET is_available = false WHERE sku = 'DEV-R001'`); err != nil {
 		t.Fatal(err)
@@ -109,6 +112,9 @@ func TestSeedAddsSampleMenuOnceAndConsistently(t *testing.T) {
 	}
 	if count(`SELECT count(*) FROM dining_tables`) != 6 {
 		t.Fatal("a second seed run must not add tables")
+	}
+	if count(`SELECT count(*) FROM rooms`) != 13 {
+		t.Fatal("a second seed run must not add rooms")
 	}
 	if count(`SELECT count(*) FROM products`) != products || count(`SELECT count(*) FROM products WHERE is_available = false`) != 1 {
 		t.Fatal("a second seed run must not duplicate or reset the menu")
