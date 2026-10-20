@@ -3206,6 +3206,102 @@ paths:
         '403': *id001
         '404': *id001
         '409': *id001
+  /api/v1/reports/sales:
+    get:
+      summary: Report - sales
+      description: 'Needs reports.view. Sales by day (count, before discounts, discounts, total, tax, charged to rooms, refunds and voids, net), by restaurant and bar, by how settled, and best sellers. A cashier sees only their own sales. from and to are business dates (default today, at most 366 days). format=csv downloads the report and needs reports.export; it is audited.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: from, in: query, required: false, schema: {type: string, format: date}}
+      - {name: to, in: query, required: false, schema: {type: string, format: date}}
+      - {name: format, in: query, required: false, schema: {type: string, enum: [json, csv]}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+  /api/v1/reports/collections:
+    get:
+      summary: Report - collections
+      description: 'Needs reports.view. Confirmed payments by day, method and purpose, money paid back, net by method, and payments waiting for confirmation (not counted). A cashier sees only payments they took. from and to are business dates (default today, at most 366 days). format=csv downloads the report and needs reports.export; it is audited.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: from, in: query, required: false, schema: {type: string, format: date}}
+      - {name: to, in: query, required: false, schema: {type: string, format: date}}
+      - {name: format, in: query, required: false, schema: {type: string, enum: [json, csv]}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+  /api/v1/reports/balances-due:
+    get:
+      summary: Report - balances-due
+      description: 'Needs reports.view. Who owes money right now: sales not fully paid and guest folios not settled. Not date-ranged. Not for cashiers. from and to are business dates (default today, at most 366 days). format=csv downloads the report and needs reports.export; it is audited.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: from, in: query, required: false, schema: {type: string, format: date}}
+      - {name: to, in: query, required: false, schema: {type: string, format: date}}
+      - {name: format, in: query, required: false, schema: {type: string, enum: [json, csv]}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+  /api/v1/reports/discounts-voids-refunds:
+    get:
+      summary: Report - discounts-voids-refunds
+      description: 'Needs reports.view. Every discount line and every refund or void in the range, with reason and approver. Not for cashiers. from and to are business dates (default today, at most 366 days). format=csv downloads the report and needs reports.export; it is audited.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: from, in: query, required: false, schema: {type: string, format: date}}
+      - {name: to, in: query, required: false, schema: {type: string, format: date}}
+      - {name: format, in: query, required: false, schema: {type: string, enum: [json, csv]}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+  /api/v1/reports/stock:
+    get:
+      summary: Report - stock
+      description: 'Needs reports.view. Stock on hand by item and place, and items at or under their low-stock level. Right now, not date-ranged. Not for cashiers. from and to are business dates (default today, at most 366 days). format=csv downloads the report and needs reports.export; it is audited.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: from, in: query, required: false, schema: {type: string, format: date}}
+      - {name: to, in: query, required: false, schema: {type: string, format: date}}
+      - {name: format, in: query, required: false, schema: {type: string, enum: [json, csv]}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+  /api/v1/reports/rooms:
+    get:
+      summary: Report - rooms
+      description: 'Needs reports.view. Rooms by night (sold, occupancy, revenue, average per room sold, per room available), room status counts and today''s house. Not for cashiers. from and to are business dates (default today, at most 366 days). format=csv downloads the report and needs reports.export; it is audited.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: from, in: query, required: false, schema: {type: string, format: date}}
+      - {name: to, in: query, required: false, schema: {type: string, format: date}}
+      - {name: format, in: query, required: false, schema: {type: string, enum: [json, csv]}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
 components:
   securitySchemes:
     sessionCookie:

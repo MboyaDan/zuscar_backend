@@ -28,6 +28,8 @@ import (
 	printservice "zuscar/backend/internal/printing/service"
 	purhandler "zuscar/backend/internal/purchasing/handler"
 	purservice "zuscar/backend/internal/purchasing/service"
+	reporthandler "zuscar/backend/internal/reports/handler"
+	reportservice "zuscar/backend/internal/reports/service"
 	roomhandler "zuscar/backend/internal/rooms/handler"
 	roomservice "zuscar/backend/internal/rooms/service"
 	saleshandler "zuscar/backend/internal/sales/handler"
@@ -83,6 +85,7 @@ func main() {
 			sales := salesservice.New(pool, svc, orders, settings, settings, inventory)
 			saleshandler.New(sales, log).Register(v1, h.Authenticate(false), h.CSRF())
 			roomhandler.New(roomservice.New(pool, svc, sales), log).Register(v1, h.Authenticate(false), h.CSRF())
+			reporthandler.New(reportservice.New(pool, svc, settings), log).Register(v1, h.Authenticate(false), h.CSRF())
 			printhandler.New(printservice.New(pool, svc, sales, orders, settings), log).Register(v1, h.Authenticate(false), h.CSRF())
 			return nil
 		}

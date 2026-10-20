@@ -150,12 +150,12 @@ POST,/api/v1/rooms/{id}/status,rooms.manage,-,21,transition table in behaviour.m
 GET,/api/v1/housekeeping/tasks,rooms.manage,-,21,
 POST,/api/v1/housekeeping/tasks,rooms.manage,-,21,
 PATCH,/api/v1/housekeeping/tasks/{id},rooms.manage,-,21,
-GET,/api/v1/reports/sales,reports.view,-,23,?format=csv needs reports.export and is audited
-GET,/api/v1/reports/collections,reports.view,-,23,?format=csv needs reports.export and is audited
-GET,/api/v1/reports/balances-due,reports.view,-,23,?format=csv needs reports.export and is audited
-GET,/api/v1/reports/discounts-voids-refunds,reports.view,-,23,?format=csv needs reports.export and is audited
-GET,/api/v1/reports/stock,reports.view,-,23,?format=csv needs reports.export and is audited
-GET,/api/v1/reports/rooms,reports.view,-,23,?format=csv needs reports.export and is audited
+GET,/api/v1/reports/sales,reports.view,-,21,?format=csv needs reports.export and is audited
+GET,/api/v1/reports/collections,reports.view,-,21,?format=csv needs reports.export and is audited
+GET,/api/v1/reports/balances-due,reports.view,-,21,?format=csv needs reports.export and is audited
+GET,/api/v1/reports/discounts-voids-refunds,reports.view,-,21,?format=csv needs reports.export and is audited
+GET,/api/v1/reports/stock,reports.view,-,21,?format=csv needs reports.export and is audited
+GET,/api/v1/reports/rooms,reports.view,-,21,?format=csv needs reports.export and is audited
 GET,/api/v1/reports/expenses-profit,reports.view,-,23,?format=csv needs reports.export and is audited
 GET,/api/v1/integrations/tax-invoices,reports.view,-,24,"stub, status only (DG-01)"
 POST,/api/v1/integrations/mpesa/callback,provider authenticity (unspecified),-,gated,NOT BUILT until DG-02 verified

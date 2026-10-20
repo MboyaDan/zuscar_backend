@@ -184,3 +184,10 @@ Stock counts and low stock (Stage 21, S-89 to S-92): a count is a sheet for one 
 
 - **Charge to room** (folios.post, Idempotency-Key): an order is sold to the guest in a room. It is a sale with a receipt number and stock taken, stored as charged to the folio, with one charge on the folio for the total (tax inside, as for any sale). The folio must be open and the guest in the house. The guest pays the folio at the desk; the charge is never a payment (NN-10). Corrections are credits on the folio (S-104).
 - **Housekeeping**: a room that turns dirty gets one cleaning job. Start moves dirty to cleaning, finish moves cleaning to ready, and moving the room by hand moves the job the same way. Out of service or occupied cancels a waiting job. Maintenance jobs are notes and leave the room alone.
+
+### Reports (Stage 25)
+
+- Read-only. Six reports under `/reports/*`, each as JSON (`report.sections[]` with columns, rows and totals) or as CSV with `?format=csv`. `from` and `to` are business dates (default today, at most 366 days).
+- Sales and collections can be limited to one cashier; a cashier-only user gets their own. Other reports are 403 for them. CSV needs `reports.export` and writes a `report.exported` audit event; a refused export writes nothing.
+- Money in JSON is integer cents. In CSV it is KES with two decimals, occupancy is a percentage, and a text value that starts with `=`, `+`, `-` or `@` is prefixed with an apostrophe so a spreadsheet does not run it.
+- Collections count confirmed payments only, on the Nairobi day they were confirmed (AC-20). Unconfirmed payments are listed apart.

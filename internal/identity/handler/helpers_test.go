@@ -31,6 +31,8 @@ import (
 	"zuscar/backend/internal/provision"
 	purhandler "zuscar/backend/internal/purchasing/handler"
 	purservice "zuscar/backend/internal/purchasing/service"
+	reporthandler "zuscar/backend/internal/reports/handler"
+	reportservice "zuscar/backend/internal/reports/service"
 	roomhandler "zuscar/backend/internal/rooms/handler"
 	roomservice "zuscar/backend/internal/rooms/service"
 	saleshandler "zuscar/backend/internal/sales/handler"
@@ -128,6 +130,7 @@ func newEnv(t *testing.T, o ...envOpts) *testEnv {
 	salesSvc := salesservice.New(pool, svc, orderSvc, setSvc, setSvc, invSvc)
 	saleshandler.New(salesSvc, log).Register(v1, h.Authenticate(false), h.CSRF())
 	roomhandler.New(roomservice.New(pool, svc, salesSvc), log).Register(v1, h.Authenticate(false), h.CSRF())
+	reporthandler.New(reportservice.New(pool, svc, setSvc), log).Register(v1, h.Authenticate(false), h.CSRF())
 	printhandler.New(printservice.New(pool, svc, salesSvc, orderSvc, setSvc), log).Register(v1, h.Authenticate(false), h.CSRF())
 	// Probe routes stand in for ordinary protected endpoints that later stages add.
 	v1.GET("/_probe", h.Authenticate(false), func(c *gin.Context) { c.JSON(200, gin.H{"ok": true}) })
