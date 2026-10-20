@@ -128,3 +128,57 @@ ORDER BY m.id;
 SELECT m.item_id FROM inventory_movements m
 WHERE m.ref_type = 'purchase' AND m.ref_id = $1 AND m.movement_type = 'receipt'
   AND EXISTS (SELECT 1 FROM inventory_movements r WHERE r.reverses_movement_id = m.id);
+
+-- Stage 21: stock counts.
+
+-- A gapless counter: the row lock serialises callers and a rolled-back count gives its number back (A-05).
+-- name: NextCounterValue :one
+UPDATE document_counters SET next_value = next_value + 1, updated_at = now()
+WHERE doc_type = $1 AND scope = '' RETURNING (next_value - 1)::bigint AS value;
+
+-- name: InsertCount :one
+INSERT INTO stock_counts (count_no, location_id, note, created_by) VALUES ($1, $2, $3, $4) RETURNING id;
+
+-- name: LockCount :one
+SELECT id, count_no, location_id, status FROM stock_counts WHERE id = $1 FOR UPDATE;
+
+-- name: MarkCountApproved :exec
+UPDATE stock_counts SET status = 'approved', approved_by = $2, approved_at = now() WHERE id = $1;
+
+-- name: MarkCountCancelled :exec
+UPDATE stock_counts SET status = 'cancelled', cancelled_by = $2, cancelled_at = now() WHERE id = $1;
+
+-- name: GetCount :one
+SELECT c.id, c.count_no, c.location_id, l.name AS location_name, c.status, COALESCE(c.note, '')::text AS note, c.created_by, cu.display_name AS created_by_name, c.created_at,
+       COALESCE(c.approved_by, 0)::bigint AS approved_by, COALESCE(au.display_name, '')::text AS approved_by_name, c.approved_at::timestamptz AS approved_at,
+       (SELECT count(*) FROM stock_count_lines x WHERE x.count_id = c.id)::bigint AS line_count,
+       (SELECT count(*) FROM stock_count_lines x WHERE x.count_id = c.id AND x.counted_base <> x.expected_base)::bigint AS difference_count
+FROM stock_counts c JOIN stock_locations l ON l.id = c.location_id JOIN users cu ON cu.id = c.created_by LEFT JOIN users au ON au.id = c.approved_by
+WHERE c.id = $1;
+
+-- name: ListCounts :many
+SELECT c.id, c.count_no, c.location_id, l.name AS location_name, c.status, COALESCE(c.note, '')::text AS note, c.created_by, cu.display_name AS created_by_name, c.created_at,
+       COALESCE(c.approved_by, 0)::bigint AS approved_by, COALESCE(au.display_name, '')::text AS approved_by_name, c.approved_at::timestamptz AS approved_at,
+       (SELECT count(*) FROM stock_count_lines x WHERE x.count_id = c.id)::bigint AS line_count,
+       (SELECT count(*) FROM stock_count_lines x WHERE x.count_id = c.id AND x.counted_base <> x.expected_base)::bigint AS difference_count
+FROM stock_counts c JOIN stock_locations l ON l.id = c.location_id JOIN users cu ON cu.id = c.created_by LEFT JOIN users au ON au.id = c.approved_by
+WHERE (sqlc.arg('status')::text = '' OR c.status = sqlc.arg('status')::text)
+  AND (sqlc.arg('before_id')::bigint = 0 OR c.id < sqlc.arg('before_id')::bigint)
+ORDER BY c.id DESC LIMIT sqlc.arg('row_limit')::int;
+
+-- name: ListCountLines :many
+SELECT x.item_id, i.name AS item_name, u.code AS base_unit_code, x.counted_base, x.entered_qty, x.entered_unit_id, eu.code AS entered_unit_code, x.expected_base, x.saved_at
+FROM stock_count_lines x JOIN inventory_items i ON i.id = x.item_id JOIN units_of_measure u ON u.id = i.base_unit_id JOIN units_of_measure eu ON eu.id = x.entered_unit_id
+WHERE x.count_id = $1 ORDER BY lower(i.name);
+
+-- name: GetCountLine :one
+SELECT counted_base, expected_base FROM stock_count_lines WHERE count_id = $1 AND item_id = $2;
+
+-- name: UpsertCountLine :exec
+INSERT INTO stock_count_lines (count_id, item_id, counted_base, entered_qty, entered_unit_id, expected_base)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (count_id, item_id) DO UPDATE SET counted_base = EXCLUDED.counted_base, entered_qty = EXCLUDED.entered_qty, entered_unit_id = EXCLUDED.entered_unit_id,
+  expected_base = EXCLUDED.expected_base, saved_at = now();
+
+-- name: DeleteCountLinesExcept :exec
+DELETE FROM stock_count_lines WHERE count_id = $1 AND NOT (item_id = ANY($2::bigint[]));

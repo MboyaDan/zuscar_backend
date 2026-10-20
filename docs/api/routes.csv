@@ -110,11 +110,13 @@ POST,/api/v1/purchases/{id}/receive,purchasing.manage,Y,18,receipt movements
 GET,/api/v1/purchases/{id},purchasing.manage,-,18,
 POST,/api/v1/purchases/{id}/cancel,purchasing.manage,-,18,draft only
 GET,/api/v1/inventory/counts,inventory.adjust,-,19,
-POST,/api/v1/inventory/counts,inventory.adjust,-,19,
-PUT,/api/v1/inventory/counts/{id}/lines,inventory.adjust,-,19,
+POST,/api/v1/inventory/counts,inventory.adjust,Y,19,starts a sheet for one place; no stock change
+GET,/api/v1/inventory/counts/{id},inventory.adjust,-,19,
+POST,/api/v1/inventory/counts/{id}/cancel,inventory.adjust,-,19,draft only
+PUT,/api/v1/inventory/counts/{id}/lines,inventory.adjust,-,19,replaces the sheet's lines
 POST,/api/v1/inventory/counts/{id}/approve,inventory.adjust,Y,19,posts count_adjustment movements
-GET,/api/v1/recipes,catalogue.manage,-,19,off unless configured
-PUT,/api/v1/recipes/{productId},catalogue.manage,-,19,
+GET,/api/v1/recipes,catalogue.manage,-,22,off unless configured
+PUT,/api/v1/recipes/{productId},catalogue.manage,-,22,
 GET,/api/v1/inventory/low-stock,inventory.view,-,19,
 GET,/api/v1/room-types,rooms.manage,-,20,
 POST,/api/v1/room-types,rooms.manage,-,20,

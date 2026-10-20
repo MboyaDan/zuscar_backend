@@ -26,6 +26,14 @@ type AuditLog struct {
 	Ip          *netip.Addr
 }
 
+type DocumentCounter struct {
+	DocType   string
+	Scope     string
+	Prefix    string
+	NextValue int64
+	UpdatedAt pgtype.Timestamptz
+}
+
 type InventoryItem struct {
 	ID                int64
 	Name              string
@@ -108,10 +116,51 @@ type StockBalance struct {
 	LastMovementAt interface{}
 }
 
+type StockCount struct {
+	ID          int64
+	CountNo     int64
+	LocationID  int64
+	Status      string
+	Note        pgtype.Text
+	CreatedBy   int64
+	CreatedAt   pgtype.Timestamptz
+	ApprovedBy  pgtype.Int8
+	ApprovedAt  pgtype.Timestamptz
+	CancelledBy pgtype.Int8
+	CancelledAt pgtype.Timestamptz
+}
+
+type StockCountLine struct {
+	ID            int64
+	CountID       int64
+	ItemID        int64
+	CountedBase   int64
+	EnteredQty    int64
+	EnteredUnitID int64
+	ExpectedBase  int64
+	SavedAt       pgtype.Timestamptz
+}
+
 type StockLocation struct {
 	ID        int64
 	Code      string
 	Name      string
+	Active    bool
+	CreatedAt pgtype.Timestamptz
+}
+
+type SystemSetting struct {
+	Key       string
+	Value     []byte
+	UpdatedBy pgtype.Int8
+	UpdatedAt pgtype.Timestamptz
+}
+
+type TaxRate struct {
+	ID        int64
+	Code      string
+	Name      string
+	RateBp    int32
 	Active    bool
 	CreatedAt pgtype.Timestamptz
 }
