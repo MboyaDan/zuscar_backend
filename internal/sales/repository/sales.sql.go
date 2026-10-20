@@ -136,7 +136,7 @@ func (q *Queries) GetPaymentTarget(ctx context.Context, id int64) (GetPaymentTar
 const getSaleHead = `-- name: GetSaleHead :one
 SELECT s.id, s.receipt_no, COALESCE(s.order_id, 0)::bigint AS order_id, COALESCE(o.order_no, 0)::bigint AS order_no, s.business_date, s.subtotal_cents, s.discount_cents,
        s.tax_cents, s.total_cents, s.status, s.payment_status, s.source, s.cashier_id, cu.display_name AS cashier_name, COALESCE(s.waiter_id, 0)::bigint AS waiter_id,
-       s.tax_status, s.created_at, s.updated_at, COALESCE(s.shift_id, 0)::bigint AS shift_id
+       s.tax_status, s.created_at, s.updated_at, COALESCE(s.shift_id, 0)::bigint AS shift_id, s.folio_id
 FROM sales s
 JOIN users cu ON cu.id = s.cashier_id
 LEFT JOIN orders o ON o.id = s.order_id
@@ -163,6 +163,7 @@ type GetSaleHeadRow struct {
 	CreatedAt     pgtype.Timestamptz
 	UpdatedAt     pgtype.Timestamptz
 	ShiftID       int64
+	FolioID       pgtype.Int8
 }
 
 func (q *Queries) GetSaleHead(ctx context.Context, id int64) (GetSaleHeadRow, error) {
@@ -188,6 +189,7 @@ func (q *Queries) GetSaleHead(ctx context.Context, id int64) (GetSaleHeadRow, er
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ShiftID,
+		&i.FolioID,
 	)
 	return i, err
 }
@@ -280,8 +282,8 @@ func (q *Queries) InsertPayment(ctx context.Context, arg InsertPaymentParams) (i
 
 const insertSale = `-- name: InsertSale :one
 
-INSERT INTO sales (receipt_no, order_id, business_date, subtotal_cents, discount_cents, tax_cents, total_cents, payment_status, cashier_id, waiter_id, tax_status, shift_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id
+INSERT INTO sales (receipt_no, order_id, business_date, subtotal_cents, discount_cents, tax_cents, total_cents, payment_status, cashier_id, waiter_id, tax_status, shift_id, folio_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id
 `
 
 type InsertSaleParams struct {
@@ -297,6 +299,7 @@ type InsertSaleParams struct {
 	WaiterID      pgtype.Int8
 	TaxStatus     string
 	ShiftID       pgtype.Int8
+	FolioID       pgtype.Int8
 }
 
 // Stage 11a: sales and payments. Money is BIGINT cents.
@@ -314,6 +317,7 @@ func (q *Queries) InsertSale(ctx context.Context, arg InsertSaleParams) (int64, 
 		arg.WaiterID,
 		arg.TaxStatus,
 		arg.ShiftID,
+		arg.FolioID,
 	)
 	var id int64
 	err := row.Scan(&id)

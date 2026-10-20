@@ -3135,6 +3135,77 @@ paths:
         '403': *id001
         '404': *id001
         '409': *id001
+  /api/v1/folios/{id}/charges:
+    post:
+      summary: Charge a POS order to the guest in a room
+      description: 'Needs folios.post and an Idempotency-Key. Makes a sale charged to the folio (no payment) and posts one folio charge. 409: folio_closed, guest_not_in_house, order_already_finalised, order_empty, nothing_to_charge. 403 discount_not_permitted.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [order_id], properties: {order_id: {type: integer, format: int64}, expected_version: {type: integer}, discounts: {type: array, items: {type: object, required: [order_item_id, amount_cents, reason], properties: {order_item_id: {type: integer, format: int64}, amount_cents: {type: integer, minimum: 1}, reason: {type: string}}}}}}
+      responses:
+        '201':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/housekeeping/tasks:
+    get:
+      summary: List housekeeping tasks
+      description: 'Needs rooms.manage. status: active, open, in_progress, done or cancelled; room_id filters one room. Newest active jobs first.'
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+    post:
+      summary: Add a housekeeping task
+      description: 'Needs rooms.manage. kind clean or maintenance (maintenance needs a note). 409 task_exists if the room already has a cleaning job.'
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [room_id, kind], properties: {room_id: {type: integer, format: int64}, kind: {type: string, enum: [clean, maintenance]}, note: {type: string, maxLength: 200}, assigned_to: {type: integer, format: int64}}}
+      responses:
+        '201':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '409': *id001
+  /api/v1/housekeeping/tasks/{id}:
+    patch:
+      summary: Move a housekeeping task on
+      description: 'Needs rooms.manage. status in_progress, done or cancelled; note; assigned_to (0 takes the name off). Starting or finishing a cleaning job moves the room. 409 task_finished, invalid_transition.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, properties: {status: {type: string, enum: [in_progress, done, cancelled]}, note: {type: string, maxLength: 200}, assigned_to: {type: integer}}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
 components:
   securitySchemes:
     sessionCookie:

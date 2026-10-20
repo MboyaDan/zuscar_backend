@@ -238,6 +238,34 @@ func (q *Queries) InsertFolio(ctx context.Context, arg InsertFolioParams) (int64
 	return id, err
 }
 
+const insertPosCharge = `-- name: InsertPosCharge :one
+INSERT INTO folio_items (folio_id, kind, description, amount_cents, tax_rate_bp, tax_cents, sale_id, posted_by)
+VALUES ($1, 'pos_charge', $2, $3, 0, $4, $5, $6) RETURNING id
+`
+
+type InsertPosChargeParams struct {
+	FolioID     int64
+	Description string
+	AmountCents int64
+	TaxCents    int64
+	SaleID      pgtype.Int8
+	PostedBy    int64
+}
+
+func (q *Queries) InsertPosCharge(ctx context.Context, arg InsertPosChargeParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertPosCharge,
+		arg.FolioID,
+		arg.Description,
+		arg.AmountCents,
+		arg.TaxCents,
+		arg.SaleID,
+		arg.PostedBy,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const insertRoomNight = `-- name: InsertRoomNight :exec
 INSERT INTO folio_items (folio_id, kind, description, amount_cents, tax_rate_bp, tax_cents, night_date, posted_by)
 VALUES ($1, 'room_night', $2, $3, $4, $5, $6, $7)

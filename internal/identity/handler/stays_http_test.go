@@ -435,7 +435,7 @@ func TestStage23_RoomStatusAndInHouse(t *testing.T) {
 			Balance    *int64 `json:"balance_cents"`
 		} `json:"stays"`
 	}](t, r.call(wj, "GET", "/api/v1/rooms/in-house", nil, 200, ""))
-	if len(lim.Stays) != 1 || lim.Stays[0].GuestName != "Amina Otieno" || lim.Stays[0].Balance != nil || lim.Stays[0].FolioID != nil {
+	if len(lim.Stays) != 1 || lim.Stays[0].GuestName != "Amina Otieno" || lim.Stays[0].Balance != nil || lim.Stays[0].FolioID == nil || *lim.Stays[0].FolioID != ci.FolioID {
 		t.Fatalf("in-house for a waiter: %+v", lim.Stays)
 	}
 	_ = other

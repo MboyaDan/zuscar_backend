@@ -17,6 +17,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	inventoryservice "zuscar/backend/internal/inventory/service"
+	orderservice "zuscar/backend/internal/orders/service"
 	"zuscar/backend/internal/platform/audit"
 	"zuscar/backend/internal/platform/auth"
 	"zuscar/backend/internal/rooms/repository"
@@ -33,6 +35,10 @@ type NotFoundError struct{ What string }
 
 func (e *NotFoundError) Error() string { return e.What + " not found" }
 
+type ForbiddenError struct{ Code, Msg string }
+
+func (e *ForbiddenError) Error() string { return e.Msg }
+
 type ConflictError struct{ Code, Field, Msg string }
 
 func (e *ConflictError) Error() string { return e.Msg }
@@ -47,6 +53,8 @@ type Payments interface {
 	RecordFolioPayment(ctx context.Context, tx pgx.Tx, actor *auth.Principal, in salesservice.FolioPayment) (salesservice.PaymentRecord, error)
 	FolioPaymentTotals(ctx context.Context, tx pgx.Tx, folioID int64) (confirmed, pending int64, err error)
 	FolioPayments(ctx context.Context, tx pgx.Tx, folioID int64) ([]salesservice.PaymentRecord, error)
+	PrepareFolioCharge(ctx context.Context, actor *auth.Principal, in salesservice.FinaliseInput) (salesservice.ChargePrep, error)
+	FinaliseToFolio(ctx context.Context, tx pgx.Tx, actor *auth.Principal, folioID, orderID int64, in salesservice.FinaliseInput, prep salesservice.ChargePrep, m salesservice.Meta) (salesservice.SaleView, error)
 }
 
 type Service struct {
@@ -64,7 +72,24 @@ func translate(err error) error {
 	var v *salesservice.ValidationError
 	var c *salesservice.ConflictError
 	var n *salesservice.NotFoundError
+	var fe *salesservice.ForbiddenError
+	var on *orderservice.NotFoundError
+	var oc *orderservice.ConflictError
+	var ic *inventoryservice.ConflictError
+	var iv *inventoryservice.ValidationError
 	switch {
+	case errors.Is(err, salesservice.ErrForbidden):
+		return ErrForbidden
+	case errors.As(err, &fe):
+		return &ForbiddenError{Code: fe.Code, Msg: fe.Msg}
+	case errors.As(err, &on):
+		return &NotFoundError{What: on.What}
+	case errors.As(err, &oc):
+		return &ConflictError{Code: oc.Code, Msg: oc.Msg}
+	case errors.As(err, &ic):
+		return &ConflictError{Code: ic.Code, Msg: ic.Msg}
+	case errors.As(err, &iv):
+		return &ValidationError{Field: iv.Field, Msg: iv.Msg}
 	case errors.As(err, &v):
 		return &ValidationError{Field: v.Field, Msg: v.Msg}
 	case errors.As(err, &c):

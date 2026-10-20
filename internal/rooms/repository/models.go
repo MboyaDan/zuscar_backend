@@ -74,6 +74,20 @@ type GuestFolio struct {
 	ClosedBy           pgtype.Int8
 }
 
+type HousekeepingTask struct {
+	ID         int64
+	RoomID     int64
+	Kind       string
+	Status     string
+	Note       string
+	AssignedTo pgtype.Int8
+	CreatedBy  int64
+	CreatedAt  pgtype.Timestamptz
+	StartedAt  pgtype.Timestamptz
+	FinishedAt pgtype.Timestamptz
+	FinishedBy pgtype.Int8
+}
+
 type LoginAttempt struct {
 	ID           int64
 	UsernameNorm string

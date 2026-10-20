@@ -55,7 +55,10 @@ func (s *Service) setStatus(ctx context.Context, tx pgx.Tx, q *repository.Querie
 		return err
 	}
 	txt := pgtype.Text{String: reason, Valid: reason != ""}
-	return q.InsertRoomStatusHistory(ctx, repository.InsertRoomStatusHistoryParams{RoomID: roomID, FromStatus: from, ToStatus: to, ChangedBy: actor.UserID, Reason: txt})
+	if err := q.InsertRoomStatusHistory(ctx, repository.InsertRoomStatusHistoryParams{RoomID: roomID, FromStatus: from, ToStatus: to, ChangedBy: actor.UserID, Reason: txt}); err != nil {
+		return err
+	}
+	return s.syncTasks(ctx, q, actor, roomID, to)
 }
 
 func (s *Service) postNights(ctx context.Context, q *repository.Queries, actor *auth.Principal, folioID int64, room string, rateBP int, rate int64, from, to time.Time) error {
@@ -414,12 +417,13 @@ type InHouseView struct {
 }
 
 // InHouse lists the guests in the house. Anyone with rooms.view sees room and guest; the folio and the balance need
-// folios.view, so a waiter picking a room to charge sees who is where and nothing about the account.
+// folios.view, so a waiter picking a room to charge sees who is where and the folio to post to (folios.post), but not what the guest owes.
 func (s *Service) InHouse(ctx context.Context, actor *auth.Principal) ([]InHouseView, error) {
 	if actor == nil || !actor.Has("rooms.view") {
 		return nil, ErrForbidden
 	}
 	showFolio := actor.Has("folios.view")
+	canCharge := actor.Has("folios.post")
 	var out []InHouseView
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := repository.New(tx)
@@ -431,8 +435,10 @@ func (s *Service) InHouse(ctx context.Context, actor *auth.Principal) ([]InHouse
 		for _, r := range rows {
 			v := InHouseView{StayID: r.StayID, RoomID: r.RoomID, RoomNumber: r.RoomNumber, RoomType: r.RoomType, GuestID: r.GuestID, GuestName: r.GuestName,
 				ReservationNo: r.ReservationNo, CheckIn: dateStr(r.CheckIn), ExpectedOut: dateStr(r.ExpectedOut), Adults: int(r.Adults)}
+			if r.FolioID != 0 && (showFolio || canCharge) {
+				v.FolioID = idPtr(r.FolioID) // the number a room charge is posted to; the balance below stays with folios.view
+			}
 			if showFolio && r.FolioID != 0 {
-				v.FolioID = idPtr(r.FolioID)
 				paid, _, err := s.pay.FolioPaymentTotals(ctx, tx, r.FolioID)
 				if err != nil {
 					return err
