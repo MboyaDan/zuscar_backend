@@ -41,6 +41,10 @@ func (h *Handler) Register(v1 *gin.RouterGroup, guard ...gin.HandlerFunc) {
 	g.GET("/movements", view, h.movements)
 	g.POST("/opening-balances", adjust, idempotency.Required(), h.openingBalances)
 	g.POST("/adjustments", adjust, idempotency.Required(), h.adjustments)
+	transfer := requirePermission("inventory.transfer")
+	wastage := requirePermission("inventory.wastage")
+	g.POST("/transfers", transfer, idempotency.Required(), h.transfers)
+	g.POST("/wastage", wastage, idempotency.Required(), h.wastage)
 	g.POST("/movements/:id/reverse", adjust, idempotency.Required(), h.reverse)
 }
 
@@ -395,6 +399,60 @@ func (h *Handler) reverse(c *gin.Context) {
 	}
 	out, replayed, err := h.svc.Reverse(c.Request.Context(), auth.From(c), service.ReverseInput{MovementID: id, Reason: in.Reason, OverrideNegative: in.OverrideNegative, OverrideReason: in.OverrideReason},
 		idempotency.From(c), meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	if replayed != nil {
+		replay(c, replayed)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"movement": out})
+}
+
+func (h *Handler) transfers(c *gin.Context) {
+	var in struct {
+		ItemID           int64  `json:"item_id"`
+		FromLocationID   int64  `json:"from_location_id"`
+		ToLocationID     int64  `json:"to_location_id"`
+		Qty              int64  `json:"qty"`
+		UnitID           *int64 `json:"unit_id"`
+		Note             string `json:"note"`
+		OverrideNegative bool   `json:"override_negative"`
+		OverrideReason   string `json:"override_reason"`
+	}
+	if !body(c, &in) {
+		return
+	}
+	out, replayed, err := h.svc.Transfer(c.Request.Context(), auth.From(c), service.TransferInput{ItemID: in.ItemID, FromLocationID: in.FromLocationID, ToLocationID: in.ToLocationID,
+		Qty: in.Qty, UnitID: in.UnitID, Note: in.Note, OverrideNegative: in.OverrideNegative, OverrideReason: in.OverrideReason}, idempotency.From(c), meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	if replayed != nil {
+		replay(c, replayed)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"movements": out})
+}
+
+func (h *Handler) wastage(c *gin.Context) {
+	var in struct {
+		ItemID           int64  `json:"item_id"`
+		LocationID       int64  `json:"location_id"`
+		Kind             string `json:"kind"`
+		Qty              int64  `json:"qty"`
+		UnitID           *int64 `json:"unit_id"`
+		Reason           string `json:"reason"`
+		OverrideNegative bool   `json:"override_negative"`
+		OverrideReason   string `json:"override_reason"`
+	}
+	if !body(c, &in) {
+		return
+	}
+	out, replayed, err := h.svc.Wastage(c.Request.Context(), auth.From(c), service.WastageInput{ItemID: in.ItemID, LocationID: in.LocationID, Kind: in.Kind, Qty: in.Qty,
+		UnitID: in.UnitID, Reason: in.Reason, OverrideNegative: in.OverrideNegative, OverrideReason: in.OverrideReason}, idempotency.From(c), meta(c))
 	if err != nil {
 		h.fail(c, err)
 		return

@@ -360,3 +360,18 @@ Stage 1 (architecture pack, docs only): no input needed from you.
 - **Ran:** `npm ci`, `npm run lint`, `npx tsc --noEmit`, `npm run check:brand`, `npm run build` in a fresh clone at the merged commit, all clean.
 - **Not run:** adding stock when a delivery arrives, transfers, wastage, counts (Stages 18 and 19); an in-app help page for stock; a low-stock list across items (the cards carry the flag); an automated component test (the frontend has no test runner). Browser console: only the deliberate 409s (second opening balance, the below-zero warning) and the app's usual signed-out check.
 - **Next:** Stage 18 (transfers, wastage, suppliers, purchases) on the owner's say-so.
+
+## Stage 18a (backend): transfers and wastage
+- **Built:** migration `0021_transfers.sql` (a transfer group is set exactly for moved-out and moved-in rows; a deferred trigger requires each group to net to zero over exactly two places and one item); `POST /inventory/transfers` (inventory.transfer) and `POST /inventory/wastage` (inventory.wastage), both needing an Idempotency-Key. A transfer is two ledger rows in one transaction; wastage, breakage and complimentary stock are reductions with a mandatory reason. Both use the adjustment's below-zero rule and override.
+- **Scope decision:** you asked for the option that saves tokens and leaves room for review, so Stage 18 is transfers and wastage only. Suppliers, deliveries (stock in with a unit cost) and stock counts move to Stage 19 and later (S-80).
+- **Decided as defaults (S-78 to S-80 in `ASSUMPTIONS.md`):** a transfer is not reversed, it is undone by moving stock back; wastage has no approval step, the person, time and reason are the record; the existing role keys decide who may do each.
+- **Ran:** `go build`, `go vet`, `gofmt`, `sqlc generate`, the full `go test ./...` against PostgreSQL 16. New: `TestAC06_TransferPairsNetToZero` (two rows, one group, nets to zero; a retry with one key moves stock once; the database refuses a lone leg; a transfer cannot be reversed), `TestAC06_TransferRules`, `TestAC06_ConcurrentTransfersNeverOverdraw` (12 parallel moves of 1 against 5 in stock: exactly 5 go through), `TestAC06_WastageBreakageComplimentary`. Mutation check: removing the source balance check fails the rules and concurrency tests. AC-06 is now complete.
+- **Not run:** suppliers, deliveries, stock counts, wastage cost (no cost is stored yet), a stock report.
+- **Next:** 18b screens, then Stage 19 (suppliers, deliveries, stock counts) on the owner's say-so.
+
+## Stage 18b (frontend): move and wastage screens
+
+- **Built:** on the Stock page, a **Move** button (needs `inventory.transfer`) and a **Wastage** button (needs `inventory.wastage`) on each item. Move picks a from place, a to place, a quantity in any unit the item has, and an optional note. Wastage picks wastage, breakage or complimentary, a place, a quantity and a required reason. Both ask for a reason when the move would take a place below zero and the person holds the override right; one idempotency key per distinct request, so a double tap records once. Storekeepers and bartenders see the buttons without needing the adjust right.
+- **Ran (frontend):** `npm ci`, lint, `tsc --noEmit`, brand check, production build, and a browser run: a transfer of 4 from the bar leaves 6 there, a move of 20 asks for the below-zero reason, wastage of 2 leaves 4, the movements list shows the transfer, the storekeeper sees both buttons, and the dialog fits at 390 px with no sideways scroll.
+- **Not run:** a real device test; the other roles beyond the storekeeper.
+- **Next:** Stage 19 (suppliers, deliveries with unit cost, stock counts) on the owner's say-so.
