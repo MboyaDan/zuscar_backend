@@ -26,6 +26,14 @@ type AuditLog struct {
 	Ip          *netip.Addr
 }
 
+type DocumentCounter struct {
+	DocType   string
+	Scope     string
+	Prefix    string
+	NextValue int64
+	UpdatedAt pgtype.Timestamptz
+}
+
 type InventoryItem struct {
 	ID                int64
 	Name              string
@@ -71,6 +79,32 @@ type Permission struct {
 	IsProtected bool
 }
 
+type Purchase struct {
+	ID          int64
+	PurchaseNo  int64
+	SupplierID  int64
+	Status      string
+	InvoiceRef  pgtype.Text
+	Note        pgtype.Text
+	LocationID  pgtype.Int8
+	CreatedBy   int64
+	CreatedAt   pgtype.Timestamptz
+	ReceivedBy  pgtype.Int8
+	ReceivedAt  pgtype.Timestamptz
+	CancelledBy pgtype.Int8
+	CancelledAt pgtype.Timestamptz
+}
+
+type PurchaseItem struct {
+	ID            int64
+	PurchaseID    int64
+	ItemID        int64
+	EnteredQty    int64
+	EnteredUnitID int64
+	QtyBase       int64
+	UnitCostCents int64
+}
+
 type Role struct {
 	ID          int64
 	Code        string
@@ -112,6 +146,31 @@ type StockLocation struct {
 	ID        int64
 	Code      string
 	Name      string
+	Active    bool
+	CreatedAt pgtype.Timestamptz
+}
+
+type Supplier struct {
+	ID        int64
+	Name      string
+	Contact   pgtype.Text
+	Active    bool
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
+}
+
+type SystemSetting struct {
+	Key       string
+	Value     []byte
+	UpdatedBy pgtype.Int8
+	UpdatedAt pgtype.Timestamptz
+}
+
+type TaxRate struct {
+	ID        int64
+	Code      string
+	Name      string
+	RateBp    int32
 	Active    bool
 	CreatedAt pgtype.Timestamptz
 }

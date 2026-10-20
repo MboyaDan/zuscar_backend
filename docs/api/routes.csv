@@ -105,8 +105,10 @@ GET,/api/v1/suppliers,purchasing.manage,-,18,
 POST,/api/v1/suppliers,purchasing.manage,-,18,
 PATCH,/api/v1/suppliers/{id},purchasing.manage,-,18,
 GET,/api/v1/purchases,purchasing.manage,-,18,
-POST,/api/v1/purchases,purchasing.manage,-,18,
+POST,/api/v1/purchases,purchasing.manage,Y,18,draft; no stock change
 POST,/api/v1/purchases/{id}/receive,purchasing.manage,Y,18,receipt movements
+GET,/api/v1/purchases/{id},purchasing.manage,-,18,
+POST,/api/v1/purchases/{id}/cancel,purchasing.manage,-,18,draft only
 GET,/api/v1/inventory/counts,inventory.adjust,-,19,
 POST,/api/v1/inventory/counts,inventory.adjust,-,19,
 PUT,/api/v1/inventory/counts/{id}/lines,inventory.adjust,-,19,

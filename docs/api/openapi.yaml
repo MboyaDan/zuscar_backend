@@ -2401,6 +2401,137 @@ paths:
         '401': *id001
         '403': *id001
         '409': *id001
+  /api/v1/suppliers:
+    get:
+      summary: List suppliers
+      description: 'Needs purchasing.manage. ?active=true hides switched-off suppliers.'
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: OK
+        '401': *id001
+        '403': *id001
+    post:
+      summary: Add a supplier
+      description: 'Needs purchasing.manage. The name is unique whatever the capitals (409 duplicate_name).'
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [name], properties: {name: {type: string, maxLength: 120}, contact: {type: string, maxLength: 200}}}
+      responses:
+        '201':
+          description: Created
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '409': *id001
+  /api/v1/suppliers/{id}:
+    patch:
+      summary: Change or switch off a supplier
+      description: 'Needs purchasing.manage. Any of name, contact, active.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, properties: {name: {type: string}, contact: {type: string}, active: {type: boolean}}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/purchases:
+    get:
+      summary: List purchases, newest first
+      description: 'Needs purchasing.manage. Filters: status (draft, received, cancelled), supplier_id; before_id and limit page the list.'
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+    post:
+      summary: Write a purchase draft
+      description: 'Needs purchasing.manage and the Idempotency-Key header. 1 to 100 lines, each item once; qty in the item''s base unit or a unit it has a conversion for; unit_cost_cents is the invoiced price of one entered unit (0 to 10,000,000). Changes no stock. 409 supplier_inactive, item_inactive.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: Idempotency-Key, in: header, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [supplier_id, lines], properties: {supplier_id: {type: integer, format: int64}, invoice_ref: {type: string, maxLength: 60}, note: {type: string, maxLength: 200}, lines: {type: array, items: {type: object, required: [item_id, qty, unit_cost_cents], properties: {item_id: {type: integer, format: int64}, qty: {type: integer, format: int64, minimum: 1}, unit_id: {type: integer, format: int64}, unit_cost_cents: {type: integer, format: int64, minimum: 0}}}}}}
+      responses:
+        '201':
+          description: Created
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '409': *id001
+  /api/v1/purchases/{id}:
+    get:
+      summary: One purchase with its lines
+      description: 'Needs purchasing.manage.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      responses:
+        '200':
+          description: OK
+        '401': *id001
+        '403': *id001
+        '404': *id001
+  /api/v1/purchases/{id}/receive:
+    post:
+      summary: Receive a purchase into a place
+      description: 'Needs purchasing.manage and the Idempotency-Key header. Books one receipt movement per line, with its cost, and marks the purchase received, in one transaction. 409 purchase_not_open if it is already received or cancelled. A wrong receipt is undone by reversing its movement.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      - {name: Idempotency-Key, in: header, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [location_id], properties: {location_id: {type: integer, format: int64}, invoice_ref: {type: string, maxLength: 60}}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/purchases/{id}/cancel:
+    post:
+      summary: Cancel a draft purchase
+      description: 'Needs purchasing.manage. Only a draft; nothing was booked. 409 purchase_not_open otherwise.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      responses:
+        '200':
+          description: OK
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
 components:
   securitySchemes:
     sessionCookie:
