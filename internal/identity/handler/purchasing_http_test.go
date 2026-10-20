@@ -199,3 +199,114 @@ func TestAC06_ConcurrentReceivesBookOnce(t *testing.T) {
 		t.Fatalf("%d receives succeeded, balance %d; want exactly 1 and 7", won, v.balance(it, v.mainStore))
 	}
 }
+
+// Stage 20: what actually arrived (S-85 to S-88).
+
+type arrivedOut struct {
+	Purchase struct {
+		ID           int64  `json:"id"`
+		Status       string `json:"status"`
+		TotalCents   int64  `json:"total_cents"`
+		OrderedCents int64  `json:"ordered_cents"`
+		Lines        []struct {
+			ItemID          int64  `json:"item_id"`
+			ReceivedQty     *int64 `json:"received_qty"`
+			ReceivedQtyBase *int64 `json:"received_qty_base"`
+			ReceivedCost    *int64 `json:"received_unit_cost_cents"`
+			LineCents       int64  `json:"line_cents"`
+			ReceiptReversed bool   `json:"receipt_reversed"`
+		} `json:"lines"`
+	} `json:"purchase"`
+}
+
+func (v *invEnv) receiveLines(j jar, id, loc int64, key string, lines []map[string]any, want int, errCode string) *httptest.ResponseRecorder {
+	v.t.Helper()
+	w := v.e.do(req{method: "POST", path: "/api/v1/purchases/" + itoa(id) + "/receive", jar: j, header: map[string]string{"Idempotency-Key": key}, body: map[string]any{"location_id": loc, "lines": lines}})
+	expect(v.t, w, want, errCode)
+	return w
+}
+
+func TestAC06_ReceiveRecordsWhatActuallyArrived(t *testing.T) {
+	v := newInvEnv(t)
+	a, b := v.item("Lemons", v.pc), v.item("Limes", v.pc)
+	sup := v.supplier(v.store, "Greengrocer", 201, "")
+	order := []map[string]any{{"item_id": a, "qty": 10, "unit_cost_cents": 1000}, {"item_id": b, "qty": 4, "unit_cost_cents": 5000}}
+	p, _ := v.buy(v.store, map[string]any{"supplier_id": sup, "lines": order}, newKey(), 201, "")
+	ordered := int64(10*1000 + 4*5000)
+
+	// Refused answers leave the purchase a draft with nothing recorded and no stock booked.
+	v.receiveLines(v.store, p.ID, v.mainStore, newKey(), []map[string]any{{"item_id": a, "qty": 0}, {"item_id": b, "qty": 0}}, 400, "validation_failed") // nothing arrived
+	v.receiveLines(v.store, p.ID, v.mainStore, newKey(), []map[string]any{{"item_id": 99999, "qty": 1}}, 400, "validation_failed")                       // not on the delivery
+	v.receiveLines(v.store, p.ID, v.mainStore, newKey(), []map[string]any{{"item_id": a, "qty": 1}, {"item_id": a, "qty": 2}}, 400, "validation_failed") // twice
+	v.receiveLines(v.store, p.ID, v.mainStore, newKey(), []map[string]any{{"item_id": a, "qty": -1}}, 400, "validation_failed")
+	v.receiveLines(v.store, p.ID, v.mainStore, newKey(), []map[string]any{{"item_id": a, "qty": 1, "unit_cost_cents": 10000001}}, 400, "validation_failed")
+	if n := v.e.count(`SELECT count(*) FROM purchase_items WHERE purchase_id = $1 AND received_qty IS NOT NULL`, p.ID); n != 0 {
+		t.Fatalf("%d lines were marked received by refused requests", n)
+	}
+	if v.balance(a, v.mainStore) != 0 || v.e.count(`SELECT count(*) FROM purchases WHERE id = $1 AND status = 'draft'`, p.ID) != 1 {
+		t.Fatal("a refused receive changed stock or the purchase")
+	}
+
+	// 8 of 10 lemons arrived, at a higher price; no limes came.
+	key := newKey()
+	lines := []map[string]any{{"item_id": a, "qty": 8, "unit_cost_cents": 1100}, {"item_id": b, "qty": 0}}
+	got := decodeInto[arrivedOut](t, v.receiveLines(v.store, p.ID, v.mainStore, key, lines, 200, ""))
+	if got.Purchase.Status != "received" || got.Purchase.TotalCents != 8*1100 || got.Purchase.OrderedCents != ordered {
+		t.Fatalf("total %d (want %d), ordered %d (want %d)", got.Purchase.TotalCents, 8*1100, got.Purchase.OrderedCents, ordered)
+	}
+	if v.balance(a, v.mainStore) != 8 || v.balance(b, v.mainStore) != 0 {
+		t.Fatalf("lemons %d (want 8), limes %d (want 0)", v.balance(a, v.mainStore), v.balance(b, v.mainStore))
+	}
+	if n := v.e.count(`SELECT unit_cost_cents FROM inventory_movements WHERE item_id = $1 AND movement_type = 'receipt'`, a); n != 1100 {
+		t.Fatalf("receipt cost %d, want the price actually paid, 1100", n)
+	}
+	if n := v.e.count(`SELECT count(*) FROM inventory_movements WHERE item_id = $1 AND movement_type = 'receipt'`, b); n != 0 {
+		t.Fatalf("%d receipts for the item that did not arrive", n)
+	}
+	// The order is still on the line beside what arrived.
+	for _, l := range decodeInto[arrivedOut](t, v.call(v.store, "GET", "/api/v1/purchases/"+itoa(p.ID), nil, 200, "")).Purchase.Lines {
+		if l.ReceivedQty == nil || l.ReceivedCost == nil {
+			t.Fatalf("line %d does not say what arrived", l.ItemID)
+		}
+		if l.ItemID == b && (*l.ReceivedQty != 0 || l.LineCents != 0) {
+			t.Fatalf("limes: received %d, line %d; want 0 and 0", *l.ReceivedQty, l.LineCents)
+		}
+	}
+	if v.e.count(`SELECT unit_cost_cents FROM purchase_items WHERE purchase_id = $1 AND item_id = $2`, p.ID, a) != 1000 {
+		t.Fatal("the ordered price was overwritten")
+	}
+
+	// The same key again replays; another key is refused.
+	w := v.receiveLines(v.store, p.ID, v.mainStore, key, lines, 200, "")
+	if w.Header().Get("Idempotent-Replayed") != "true" || v.balance(a, v.mainStore) != 8 {
+		t.Fatal("a retry received twice")
+	}
+	v.receiveLines(v.store, p.ID, v.mainStore, newKey(), lines, 409, "purchase_not_open")
+
+	// The database keeps what arrived fixed.
+	if _, err := v.e.pool.Exec(t.Context(), `UPDATE purchase_items SET received_qty = 9, received_qty_base = 9 WHERE purchase_id = $1 AND item_id = $2`, p.ID, a); err == nil {
+		t.Fatal("what arrived was edited after receiving")
+	}
+	if _, err := v.e.pool.Exec(t.Context(), `UPDATE purchase_items SET entered_qty = 99 WHERE purchase_id = $1 AND item_id = $2`, p.ID, a); err == nil {
+		t.Fatal("the order on a line was edited")
+	}
+	p2, _ := v.buy(v.store, map[string]any{"supplier_id": sup, "lines": order[:1]}, newKey(), 201, "")
+	if _, err := v.e.pool.Exec(t.Context(), `UPDATE purchases SET status = 'received', received_at = now(), received_by = created_by, location_id = $2 WHERE id = $1`, p2.ID, v.mainStore); err == nil {
+		t.Fatal("a purchase was marked received without saying what arrived")
+	}
+
+	// Reversing the lemons' receipt shows on the delivery; the purchase stays received.
+	var mv int64
+	if err := v.e.pool.QueryRow(t.Context(), `SELECT id FROM inventory_movements WHERE item_id = $1 AND movement_type = 'receipt'`, a).Scan(&mv); err != nil {
+		t.Fatal(err)
+	}
+	v.call(v.store, "POST", "/api/v1/inventory/movements/"+itoa(mv)+"/reverse", map[string]any{"reason": "bad batch, sent back"}, 201, "")
+	for _, l := range decodeInto[arrivedOut](t, v.call(v.store, "GET", "/api/v1/purchases/"+itoa(p.ID), nil, 200, "")).Purchase.Lines {
+		if l.ItemID == a && !l.ReceiptReversed {
+			t.Fatal("a reversed receipt is not shown as reversed")
+		}
+		if l.ItemID == b && l.ReceiptReversed {
+			t.Fatal("a line with no receipt is shown as reversed")
+		}
+	}
+}

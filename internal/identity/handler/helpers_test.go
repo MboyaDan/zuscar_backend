@@ -29,6 +29,8 @@ import (
 	printhandler "zuscar/backend/internal/printing/handler"
 	printservice "zuscar/backend/internal/printing/service"
 	"zuscar/backend/internal/provision"
+	purhandler "zuscar/backend/internal/purchasing/handler"
+	purservice "zuscar/backend/internal/purchasing/service"
 	saleshandler "zuscar/backend/internal/sales/handler"
 	salesservice "zuscar/backend/internal/sales/service"
 	sethandler "zuscar/backend/internal/settings/handler"
@@ -120,6 +122,7 @@ func newEnv(t *testing.T, o ...envOpts) *testEnv {
 	setSvc := setservice.New(pool, clock, svc, svc.RecentReauth)
 	invSvc := invservice.New(pool, svc, setSvc)
 	invhandler.New(invSvc, log).Register(v1, h.Authenticate(false), h.CSRF())
+	purhandler.New(purservice.New(pool, svc, invSvc), log).Register(v1, h.Authenticate(false), h.CSRF())
 	salesSvc := salesservice.New(pool, svc, orderSvc, setSvc, setSvc, invSvc)
 	saleshandler.New(salesSvc, log).Register(v1, h.Authenticate(false), h.CSRF())
 	printhandler.New(printservice.New(pool, svc, salesSvc, orderSvc, setSvc), log).Register(v1, h.Authenticate(false), h.CSRF())
