@@ -44,7 +44,7 @@ func TestAC10_EveryProtectedRouteDeniesWithoutPermission(t *testing.T) {
 	special := map[string]bool{"public": true, "terminal session": true, "system": true, "provider authenticity (unspecified)": true}
 	for _, r := range recs[1:] {
 		stage, _ := strconv.Atoi(r[4])
-		if stage > 18 || special[r[2]] {
+		if stage > 19 || special[r[2]] {
 			continue
 		}
 		// Stage 6 session routes (logout, change-password) would end the shared test session; their guards are

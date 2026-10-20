@@ -2532,6 +2532,114 @@ paths:
         '403': *id001
         '404': *id001
         '409': *id001
+  /api/v1/inventory/counts:
+    get:
+      summary: List stock counts, newest first
+      description: 'Needs inventory.adjust. Filters: status (draft, approved, cancelled); before_id and limit page the list.'
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+    post:
+      summary: Start a count for one place
+      description: 'Needs inventory.adjust and the Idempotency-Key header. Changes no stock. The count number is gapless.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: Idempotency-Key, in: header, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [location_id], properties: {location_id: {type: integer, format: int64}, note: {type: string, maxLength: 200}}}
+      responses:
+        '201':
+          description: Created
+        '400': *id001
+        '401': *id001
+        '403': *id001
+  /api/v1/inventory/counts/{id}:
+    get:
+      summary: One count with its lines
+      description: 'Needs inventory.adjust. Each line shows what was counted, what the books said when it was entered, the variance, and (for a draft) the books now.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      responses:
+        '200':
+          description: OK
+        '401': *id001
+        '403': *id001
+        '404': *id001
+  /api/v1/inventory/counts/{id}/lines:
+    put:
+      summary: Replace the lines of a draft count
+      description: 'Needs inventory.adjust. The lines given replace the sheet: items left out are removed. qty is what is on the shelf, in the base unit or a unit the item has a conversion for; 0 is allowed. A line with an unchanged counted figure keeps the books figure it was entered against. 409 count_not_open, item_inactive.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [lines], properties: {lines: {type: array, maxItems: 500, items: {type: object, required: [item_id, qty], properties: {item_id: {type: integer, format: int64}, qty: {type: integer, format: int64, minimum: 0}, unit_id: {type: integer, format: int64}}}}}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/inventory/counts/{id}/approve:
+    post:
+      summary: Approve a count and post its differences
+      description: 'Needs inventory.adjust and the Idempotency-Key header. Posts one count_adjustment movement per line that differs, in one transaction, and closes the count. Not held back by the negative-stock policy. 400 if nothing was counted; 409 count_not_open if already approved or cancelled.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      - {name: Idempotency-Key, in: header, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/inventory/counts/{id}/cancel:
+    post:
+      summary: Cancel a draft count
+      description: 'Needs inventory.adjust. Only a draft; nothing was posted. 409 count_not_open otherwise.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      responses:
+        '200':
+          description: OK
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/inventory/low-stock:
+    get:
+      summary: Items at or under their low-stock level
+      description: 'Needs inventory.view. Active items with a low-stock level whose total over every place is at or under it, lowest first.'
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: OK
+        '401': *id001
+        '403': *id001
 components:
   securitySchemes:
     sessionCookie:

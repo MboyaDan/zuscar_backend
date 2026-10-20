@@ -46,6 +46,7 @@ func (h *Handler) Register(v1 *gin.RouterGroup, guard ...gin.HandlerFunc) {
 	g.POST("/transfers", transfer, idempotency.Required(), h.transfers)
 	g.POST("/wastage", wastage, idempotency.Required(), h.wastage)
 	g.POST("/movements/:id/reverse", adjust, idempotency.Required(), h.reverse)
+	h.registerCounts(g)
 }
 
 func requirePermission(permission string) gin.HandlerFunc {
@@ -462,4 +463,140 @@ func (h *Handler) wastage(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"movement": out})
+}
+
+// ---- stock counts and the low-stock list (Stage 21) ----
+
+func (h *Handler) registerCounts(g *gin.RouterGroup) {
+	adjust := requirePermission("inventory.adjust")
+	g.GET("/counts", adjust, h.listCounts)
+	g.POST("/counts", adjust, idempotency.Required(), h.createCount)
+	g.GET("/counts/:id", adjust, h.getCount)
+	g.PUT("/counts/:id/lines", adjust, h.setCountLines)
+	g.POST("/counts/:id/approve", adjust, idempotency.Required(), h.approveCount)
+	g.POST("/counts/:id/cancel", adjust, h.cancelCount)
+	g.GET("/low-stock", requirePermission("inventory.view"), h.lowStock)
+}
+
+func (h *Handler) listCounts(c *gin.Context) {
+	status := c.Query("status")
+	switch status {
+	case "", "draft", "approved", "cancelled":
+	default:
+		zhttp.WriteError(c, http.StatusBadRequest, "validation_failed", "Some fields are invalid.", zhttp.FieldError{Field: "status", Message: "must be draft, approved or cancelled"})
+		return
+	}
+	before, ok := queryInt(c, "before_id")
+	if !ok {
+		return
+	}
+	limit, ok := queryInt(c, "limit")
+	if !ok {
+		return
+	}
+	out, err := h.svc.ListCounts(c.Request.Context(), auth.From(c), status, before, int(limit))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"counts": out})
+}
+
+func (h *Handler) getCount(c *gin.Context) {
+	id, ok := idParam(c, "count")
+	if !ok {
+		return
+	}
+	out, err := h.svc.GetCount(c.Request.Context(), auth.From(c), id)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"count": out})
+}
+
+func (h *Handler) createCount(c *gin.Context) {
+	var in struct {
+		LocationID int64  `json:"location_id"`
+		Note       string `json:"note"`
+	}
+	if !body(c, &in) {
+		return
+	}
+	out, replayed, err := h.svc.CreateCount(c.Request.Context(), auth.From(c), in.LocationID, in.Note, idempotency.From(c), meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	if replayed != nil {
+		replay(c, replayed)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"count": out})
+}
+
+func (h *Handler) setCountLines(c *gin.Context) {
+	id, ok := idParam(c, "count")
+	if !ok {
+		return
+	}
+	var in struct {
+		Lines []struct {
+			ItemID int64  `json:"item_id"`
+			Qty    int64  `json:"qty"`
+			UnitID *int64 `json:"unit_id"`
+		} `json:"lines"`
+	}
+	if !body(c, &in) {
+		return
+	}
+	lines := make([]service.CountLineInput, 0, len(in.Lines))
+	for _, l := range in.Lines {
+		lines = append(lines, service.CountLineInput{ItemID: l.ItemID, Qty: l.Qty, UnitID: l.UnitID})
+	}
+	out, err := h.svc.SetCountLines(c.Request.Context(), auth.From(c), id, lines, meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"count": out})
+}
+
+func (h *Handler) approveCount(c *gin.Context) {
+	id, ok := idParam(c, "count")
+	if !ok {
+		return
+	}
+	out, replayed, err := h.svc.ApproveCount(c.Request.Context(), auth.From(c), id, idempotency.From(c), meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	if replayed != nil {
+		replay(c, replayed)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"count": out})
+}
+
+func (h *Handler) cancelCount(c *gin.Context) {
+	id, ok := idParam(c, "count")
+	if !ok {
+		return
+	}
+	out, err := h.svc.CancelCount(c.Request.Context(), auth.From(c), id, meta(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"count": out})
+}
+
+func (h *Handler) lowStock(c *gin.Context) {
+	out, err := h.svc.LowStock(c.Request.Context(), auth.From(c))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": out})
 }

@@ -34,7 +34,7 @@ sql:
       go: { package: repository, out: internal/printing/repository, sql_package: pgx/v5 }
   - engine: postgresql
     queries: database/queries/inventory
-    schema: [database/migrations/0002_identity.sql, database/migrations/0018_inventory.sql]
+    schema: [database/migrations/0002_identity.sql, database/migrations/0004_settings.sql, database/migrations/0018_inventory.sql, database/migrations/0024_stock_counts.sql]
     gen:
       go: { package: repository, out: internal/inventory/repository, sql_package: pgx/v5 }
   - engine: postgresql
