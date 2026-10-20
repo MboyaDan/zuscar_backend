@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	inventoryservice "zuscar/backend/internal/inventory/service"
 	orderservice "zuscar/backend/internal/orders/service"
 	"zuscar/backend/internal/platform/audit"
 	"zuscar/backend/internal/platform/auth"
@@ -61,6 +62,15 @@ type Counters interface {
 	NextNumber(ctx context.Context, tx pgx.Tx, docType string) (int64, error)
 }
 
+// Stock is what sales needs from the inventory module: where a module's stock lives, and taking or returning it inside
+// the sale's own transaction (docs/architecture.md section 3, rule 4).
+type Stock interface {
+	LocationIDForModule(ctx context.Context, tx pgx.Tx, module string) (int64, error)
+	BlocksNegative(ctx context.Context, actor *auth.Principal) bool
+	Consume(ctx context.Context, tx pgx.Tx, actor *auth.Principal, saleID int64, lines []inventoryservice.StockLine, block bool) error
+	Return(ctx context.Context, tx pgx.Tx, actor *auth.Principal, refundID int64, lines []inventoryservice.StockLine, reason string) error
+}
+
 type Settings interface {
 	GetSettings(ctx context.Context, actor *auth.Principal) (map[string]json.RawMessage, error)
 }
@@ -71,11 +81,12 @@ type Service struct {
 	orders   Orders
 	counters Counters
 	settings Settings
+	stock    Stock
 	now      func() time.Time
 }
 
-func New(pool *pgxpool.Pool, rec audit.Recorder, orders Orders, counters Counters, settings Settings) *Service {
-	return &Service{pool: pool, rec: rec, orders: orders, counters: counters, settings: settings, now: time.Now}
+func New(pool *pgxpool.Pool, rec audit.Recorder, orders Orders, counters Counters, settings Settings, stock Stock) *Service {
+	return &Service{pool: pool, rec: rec, orders: orders, counters: counters, settings: settings, stock: stock, now: time.Now}
 }
 
 // WithClock replaces the clock; tests use it to pick the business day.
@@ -85,6 +96,50 @@ func (s *Service) WithClock(now func() time.Time) *Service {
 }
 
 func itoa(id int64) string { return strconv.FormatInt(id, 10) }
+
+// stockSnap is what a sale line takes from stock, worked out once and written on the line (like the tax snapshot).
+type stockSnap struct {
+	item, per, loc pgtype.Int8
+	units          int64
+}
+
+// stockPlanner snapshots the stock link of each product sold, so a later void or refund puts back exactly that.
+type stockPlanner struct {
+	s     *Service
+	ctx   context.Context
+	tx    pgx.Tx
+	prods map[int64]orderservice.ProductForSale
+	locs  map[string]int64
+	take  []inventoryservice.StockLine
+}
+
+func (s *Service) newStockPlanner(ctx context.Context, tx pgx.Tx, productIDs []int64) (*stockPlanner, error) {
+	prods, err := s.orders.ProductsForSale(ctx, tx, productIDs)
+	if err != nil {
+		return nil, err
+	}
+	return &stockPlanner{s: s, ctx: ctx, tx: tx, prods: prods, locs: map[string]int64{}}, nil
+}
+
+// snap returns the stock snapshot for a line of qty units of a product in a module (empty when the product tracks no stock).
+func (p *stockPlanner) snap(productID int64, module string, qty int32) (stockSnap, error) {
+	pr, ok := p.prods[productID]
+	if !ok || pr.InventoryItemID == 0 || pr.StockPerSale <= 0 {
+		return stockSnap{}, nil
+	}
+	loc, ok := p.locs[module]
+	if !ok {
+		id, err := p.s.stock.LocationIDForModule(p.ctx, p.tx, module)
+		if err != nil {
+			return stockSnap{}, err
+		}
+		loc = id
+		p.locs[module] = id
+	}
+	units := int64(qty) * pr.StockPerSale
+	p.take = append(p.take, inventoryservice.StockLine{ItemID: pr.InventoryItemID, LocationID: loc, Units: units})
+	return stockSnap{item: pgtype.Int8{Int64: pr.InventoryItemID, Valid: true}, per: pgtype.Int8{Int64: pr.StockPerSale, Valid: true}, loc: pgtype.Int8{Int64: loc, Valid: true}, units: units}, nil
+}
 
 func (s *Service) record(ctx context.Context, tx pgx.Tx, actor *auth.Principal, m Meta, action, entity string, id int64, before, after map[string]any) error {
 	return s.rec.Record(ctx, tx, audit.Entry{ActorID: actor.UserID, ActorLabel: actor.Username, Action: action, EntityType: entity,
@@ -431,6 +486,7 @@ func (s *Service) Finalise(ctx context.Context, actor *auth.Principal, orderID i
 	if err != nil {
 		return SaleView{}, nil, err
 	}
+	blockNeg := s.stock.BlocksNegative(ctx, actor)
 	if !ts.inclusive {
 		return SaleView{}, nil, &ConflictError{Code: "tax_exclusive_unsupported", Msg: "Tax-exclusive pricing is not supported until the accountant confirms the rule (docs/tax-configuration.md)."}
 	}
@@ -519,11 +575,24 @@ func (s *Service) Finalise(ctx context.Context, actor *auth.Principal, orderID i
 		if err != nil {
 			return err
 		}
+		pids := make([]int64, 0, len(lines))
+		for _, p := range lines {
+			pids = append(pids, p.line.ProductID)
+		}
+		plan, err := s.newStockPlanner(ctx, tx, pids)
+		if err != nil {
+			return err
+		}
 		for _, p := range lines {
 			d := disc[p.line.OrderItemID]
+			sn, err := plan.snap(p.line.ProductID, p.line.Module, p.line.Qty)
+			if err != nil {
+				return err
+			}
 			ip := repository.InsertSaleItemParams{SaleID: saleID, OrderItemID: pgtype.Int8{Int64: p.line.OrderItemID, Valid: true}, ProductID: p.line.ProductID, NameSnapshot: p.line.Name,
 				Module: p.line.Module, Qty: p.line.Qty, UnitPriceCents: p.line.UnitPriceCents, ModifiersText: p.line.ModifiersText, ModifiersCents: p.line.ModifiersCents,
-				DiscountCents: p.m.Discount, TaxCode: p.line.TaxCode, TaxTreatment: p.line.TaxTreatment, TaxRateBp: p.line.TaxRateBP, TaxCents: p.m.Tax, LineTotalCents: p.m.Net}
+				DiscountCents: p.m.Discount, TaxCode: p.line.TaxCode, TaxTreatment: p.line.TaxTreatment, TaxRateBp: p.line.TaxRateBP, TaxCents: p.m.Tax, LineTotalCents: p.m.Net,
+				InventoryItemID: sn.item, StockUnitsPerSale: sn.per, StockLocationID: sn.loc}
 			if d.AmountCents > 0 {
 				ip.DiscountReason = pgtype.Text{String: d.Reason, Valid: true}
 				ip.DiscountApprovedBy = pgtype.Int8{Int64: actor.UserID, Valid: true} // the person holding sales.discount who applied it
@@ -531,6 +600,9 @@ func (s *Service) Finalise(ctx context.Context, actor *auth.Principal, orderID i
 			if err := q.InsertSaleItem(ctx, ip); err != nil {
 				return err
 			}
+		}
+		if err := s.stock.Consume(ctx, tx, actor, saleID, plan.take, blockNeg); err != nil {
+			return err
 		}
 		now := pgtype.Timestamptz{Time: s.now(), Valid: true}
 		for _, p := range pays {

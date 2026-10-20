@@ -111,6 +111,9 @@ type ProductForSale struct {
 	TaxCode      string
 	TaxTreatment string
 	TaxRateBP    int32
+	// Stock link: 0 means the product does not track stock. Otherwise each unit sold takes StockPerSale base units of the item.
+	InventoryItemID int64
+	StockPerSale    int64
 }
 
 // ProductsForSale returns the named products by id; an id that does not exist is simply missing from the map.
@@ -121,7 +124,7 @@ func (s *Service) ProductsForSale(ctx context.Context, tx pgx.Tx, ids []int64) (
 	}
 	out := make(map[int64]ProductForSale, len(rows))
 	for _, r := range rows {
-		out[r.ID] = ProductForSale{ID: r.ID, Name: r.Name, Module: r.Module, TaxCode: r.TaxCode, TaxTreatment: r.TaxTreatment, TaxRateBP: r.TaxRateBp}
+		out[r.ID] = ProductForSale{ID: r.ID, Name: r.Name, Module: r.Module, TaxCode: r.TaxCode, TaxTreatment: r.TaxTreatment, TaxRateBP: r.TaxRateBp, InventoryItemID: r.InventoryItemID, StockPerSale: r.StockUnitsPerSale}
 	}
 	return out, nil
 }

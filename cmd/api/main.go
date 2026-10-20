@@ -16,6 +16,8 @@ import (
 	catservice "zuscar/backend/internal/catalogue/service"
 	idhandler "zuscar/backend/internal/identity/handler"
 	idservice "zuscar/backend/internal/identity/service"
+	invhandler "zuscar/backend/internal/inventory/handler"
+	invservice "zuscar/backend/internal/inventory/service"
 	orderhandler "zuscar/backend/internal/orders/handler"
 	orderservice "zuscar/backend/internal/orders/service"
 	"zuscar/backend/internal/platform/config"
@@ -71,7 +73,9 @@ func main() {
 			settings := setservice.New(pool, svc.Clock(), svc, svc.RecentReauth)
 			orders := orderservice.New(pool, svc)
 			orderhandler.New(orders, log).Register(v1, h.Authenticate(false), h.CSRF())
-			sales := salesservice.New(pool, svc, orders, settings, settings)
+			inventory := invservice.New(pool, svc, settings)
+			invhandler.New(inventory, log).Register(v1, h.Authenticate(false), h.CSRF())
+			sales := salesservice.New(pool, svc, orders, settings, settings, inventory)
 			saleshandler.New(sales, log).Register(v1, h.Authenticate(false), h.CSRF())
 			printhandler.New(printservice.New(pool, svc, sales, orders, settings), log).Register(v1, h.Authenticate(false), h.CSRF())
 			return nil

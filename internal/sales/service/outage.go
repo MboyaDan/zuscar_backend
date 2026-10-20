@@ -134,6 +134,7 @@ func (s *Service) EnterManualReceipt(ctx context.Context, actor *auth.Principal,
 	if err != nil {
 		return SaleView{}, nil, err
 	}
+	blockNeg := s.stock.BlocksNegative(ctx, actor)
 	if !ts.inclusive {
 		return SaleView{}, nil, &ConflictError{Code: "tax_exclusive_unsupported", Msg: "Tax-exclusive pricing is not supported until the accountant confirms the rule (docs/tax-configuration.md)."}
 	}
@@ -164,10 +165,6 @@ func (s *Service) EnterManualReceipt(ctx context.Context, actor *auth.Principal,
 			return err
 		}
 		var sub, tax int64
-		type priced struct {
-			in OutageLineInput
-			m  lineMoney
-		}
 		lines := make([]priced, 0, len(in.Lines))
 		for _, l := range in.Lines {
 			p, ok := prods[l.ProductID]
@@ -208,12 +205,24 @@ func (s *Service) EnterManualReceipt(ctx context.Context, actor *auth.Principal,
 		if err != nil {
 			return err
 		}
+		plan, err := s.newStockPlanner(ctx, tx, productIDsOf(lines))
+		if err != nil {
+			return err
+		}
 		for _, l := range lines {
 			p := prods[l.in.ProductID]
-			if err := q.InsertSaleItem(ctx, repository.InsertSaleItemParams{SaleID: saleID, ProductID: p.ID, NameSnapshot: p.Name, Module: p.Module, Qty: l.in.Qty,
-				UnitPriceCents: l.in.UnitPriceCents, TaxCode: p.TaxCode, TaxTreatment: p.TaxTreatment, TaxRateBp: p.TaxRateBP, TaxCents: l.m.Tax, LineTotalCents: l.m.Net}); err != nil {
+			sn, err := plan.snap(p.ID, p.Module, l.in.Qty)
+			if err != nil {
 				return err
 			}
+			if err := q.InsertSaleItem(ctx, repository.InsertSaleItemParams{SaleID: saleID, ProductID: p.ID, NameSnapshot: p.Name, Module: p.Module, Qty: l.in.Qty,
+				UnitPriceCents: l.in.UnitPriceCents, TaxCode: p.TaxCode, TaxTreatment: p.TaxTreatment, TaxRateBp: p.TaxRateBP, TaxCents: l.m.Tax, LineTotalCents: l.m.Net,
+				InventoryItemID: sn.item, StockUnitsPerSale: sn.per, StockLocationID: sn.loc}); err != nil {
+				return err
+			}
+		}
+		if err := s.stock.Consume(ctx, tx, actor, saleID, plan.take, blockNeg); err != nil {
+			return err
 		}
 		confirmedAt := pgtype.Timestamptz{Time: now, Valid: true}
 		for _, p := range pays {
@@ -292,4 +301,17 @@ func (s *Service) ListManualReceipts(ctx context.Context, actor *auth.Principal,
 			DiscrepancyNote: r.DiscrepancyNote, SourceNote: r.SourceNote, EnteredAt: r.CreatedAt.Time})
 	}
 	return out, more, nil
+}
+
+type priced struct {
+	in OutageLineInput
+	m  lineMoney
+}
+
+func productIDsOf(lines []priced) []int64 {
+	ids := make([]int64, 0, len(lines))
+	for _, l := range lines {
+		ids = append(ids, l.in.ProductID)
+	}
+	return ids
 }

@@ -6,8 +6,13 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id;
 
 -- name: InsertSaleItem :exec
 INSERT INTO sale_items (sale_id, order_item_id, product_id, name_snapshot, module, qty, unit_price_cents, modifiers_text, modifiers_cents,
-                        discount_cents, discount_reason, discount_approved_by, tax_code, tax_treatment, tax_rate_bp, tax_cents, line_total_cents)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17);
+                        discount_cents, discount_reason, discount_approved_by, tax_code, tax_treatment, tax_rate_bp, tax_cents, line_total_cents,
+                        inventory_item_id, stock_units_per_sale, stock_location_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20);
+
+-- name: ListSaleStock :many
+SELECT id AS sale_item_id, qty, inventory_item_id, stock_units_per_sale, stock_location_id
+FROM sale_items WHERE sale_id = $1 AND inventory_item_id IS NOT NULL ORDER BY id;
 
 -- name: InsertPayment :one
 INSERT INTO payments (sale_id, purpose, method, status, amount_cents, reference, created_by, confirmed_by, confirmed_at, note, shift_id)

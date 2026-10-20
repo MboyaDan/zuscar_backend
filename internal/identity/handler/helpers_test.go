@@ -20,6 +20,8 @@ import (
 	"zuscar/backend/internal/identity/handler"
 	"zuscar/backend/internal/identity/password"
 	"zuscar/backend/internal/identity/service"
+	invhandler "zuscar/backend/internal/inventory/handler"
+	invservice "zuscar/backend/internal/inventory/service"
 	orderhandler "zuscar/backend/internal/orders/handler"
 	orderservice "zuscar/backend/internal/orders/service"
 	zhttp "zuscar/backend/internal/platform/http"
@@ -116,7 +118,9 @@ func newEnv(t *testing.T, o ...envOpts) *testEnv {
 	orderSvc := orderservice.New(pool, svc)
 	orderhandler.New(orderSvc, log).Register(v1, h.Authenticate(false), h.CSRF())
 	setSvc := setservice.New(pool, clock, svc, svc.RecentReauth)
-	salesSvc := salesservice.New(pool, svc, orderSvc, setSvc, setSvc)
+	invSvc := invservice.New(pool, svc, setSvc)
+	invhandler.New(invSvc, log).Register(v1, h.Authenticate(false), h.CSRF())
+	salesSvc := salesservice.New(pool, svc, orderSvc, setSvc, setSvc, invSvc)
 	saleshandler.New(salesSvc, log).Register(v1, h.Authenticate(false), h.CSRF())
 	printhandler.New(printservice.New(pool, svc, salesSvc, orderSvc, setSvc), log).Register(v1, h.Authenticate(false), h.CSRF())
 	// Probe routes stand in for ordinary protected endpoints that later stages add.

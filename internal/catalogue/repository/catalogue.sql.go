@@ -67,18 +67,20 @@ func (q *Queries) CreateModifier(ctx context.Context, arg CreateModifierParams) 
 }
 
 const createProduct = `-- name: CreateProduct :one
-INSERT INTO products (category_id, module, name, sku, price_cents, tax_rate_id, kitchen_routed)
-VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
+INSERT INTO products (category_id, module, name, sku, price_cents, tax_rate_id, kitchen_routed, track_stock, inventory_item_id, stock_units_per_sale)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8::bigint IS NOT NULL, $8, $9) RETURNING id
 `
 
 type CreateProductParams struct {
-	CategoryID    int64
-	Module        string
-	Name          string
-	Sku           pgtype.Text
-	PriceCents    int64
-	TaxRateID     int64
-	KitchenRouted bool
+	CategoryID        int64
+	Module            string
+	Name              string
+	Sku               pgtype.Text
+	PriceCents        int64
+	TaxRateID         int64
+	KitchenRouted     bool
+	InventoryItemID   pgtype.Int8
+	StockUnitsPerSale int64
 }
 
 func (q *Queries) CreateProduct(ctx context.Context, arg CreateProductParams) (int64, error) {
@@ -90,6 +92,8 @@ func (q *Queries) CreateProduct(ctx context.Context, arg CreateProductParams) (i
 		arg.PriceCents,
 		arg.TaxRateID,
 		arg.KitchenRouted,
+		arg.InventoryItemID,
+		arg.StockUnitsPerSale,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -141,7 +145,7 @@ func (q *Queries) GetModifier(ctx context.Context, id int64) (Modifier, error) {
 }
 
 const getProduct = `-- name: GetProduct :one
-SELECT p.id, p.category_id, p.module, p.name, p.sku, p.price_cents, p.tax_rate_id, p.is_available, p.kitchen_routed,
+SELECT p.id, p.category_id, p.module, p.name, p.sku, p.price_cents, p.tax_rate_id, p.is_available, p.kitchen_routed, p.inventory_item_id, p.stock_units_per_sale,
        p.created_at, p.updated_at, c.name AS category_name,
        t.code AS tax_code, t.name AS tax_name, t.rate_bp AS tax_rate_bp, t.treatment AS tax_treatment
 FROM products p
@@ -151,22 +155,24 @@ WHERE p.id = $1
 `
 
 type GetProductRow struct {
-	ID            int64
-	CategoryID    int64
-	Module        string
-	Name          string
-	Sku           pgtype.Text
-	PriceCents    int64
-	TaxRateID     int64
-	IsAvailable   bool
-	KitchenRouted bool
-	CreatedAt     pgtype.Timestamptz
-	UpdatedAt     pgtype.Timestamptz
-	CategoryName  string
-	TaxCode       string
-	TaxName       string
-	TaxRateBp     int32
-	TaxTreatment  string
+	ID                int64
+	CategoryID        int64
+	Module            string
+	Name              string
+	Sku               pgtype.Text
+	PriceCents        int64
+	TaxRateID         int64
+	IsAvailable       bool
+	KitchenRouted     bool
+	InventoryItemID   pgtype.Int8
+	StockUnitsPerSale int64
+	CreatedAt         pgtype.Timestamptz
+	UpdatedAt         pgtype.Timestamptz
+	CategoryName      string
+	TaxCode           string
+	TaxName           string
+	TaxRateBp         int32
+	TaxTreatment      string
 }
 
 func (q *Queries) GetProduct(ctx context.Context, id int64) (GetProductRow, error) {
@@ -182,6 +188,8 @@ func (q *Queries) GetProduct(ctx context.Context, id int64) (GetProductRow, erro
 		&i.TaxRateID,
 		&i.IsAvailable,
 		&i.KitchenRouted,
+		&i.InventoryItemID,
+		&i.StockUnitsPerSale,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CategoryName,
@@ -367,7 +375,7 @@ func (q *Queries) ListProductModifierLinks(ctx context.Context, dollar_1 []int64
 }
 
 const listProducts = `-- name: ListProducts :many
-SELECT p.id, p.category_id, p.module, p.name, p.sku, p.price_cents, p.tax_rate_id, p.is_available, p.kitchen_routed,
+SELECT p.id, p.category_id, p.module, p.name, p.sku, p.price_cents, p.tax_rate_id, p.is_available, p.kitchen_routed, p.inventory_item_id, p.stock_units_per_sale,
        p.created_at, p.updated_at, c.name AS category_name,
        t.code AS tax_code, t.name AS tax_name, t.rate_bp AS tax_rate_bp, t.treatment AS tax_treatment
 FROM products p
@@ -388,22 +396,24 @@ type ListProductsParams struct {
 }
 
 type ListProductsRow struct {
-	ID            int64
-	CategoryID    int64
-	Module        string
-	Name          string
-	Sku           pgtype.Text
-	PriceCents    int64
-	TaxRateID     int64
-	IsAvailable   bool
-	KitchenRouted bool
-	CreatedAt     pgtype.Timestamptz
-	UpdatedAt     pgtype.Timestamptz
-	CategoryName  string
-	TaxCode       string
-	TaxName       string
-	TaxRateBp     int32
-	TaxTreatment  string
+	ID                int64
+	CategoryID        int64
+	Module            string
+	Name              string
+	Sku               pgtype.Text
+	PriceCents        int64
+	TaxRateID         int64
+	IsAvailable       bool
+	KitchenRouted     bool
+	InventoryItemID   pgtype.Int8
+	StockUnitsPerSale int64
+	CreatedAt         pgtype.Timestamptz
+	UpdatedAt         pgtype.Timestamptz
+	CategoryName      string
+	TaxCode           string
+	TaxName           string
+	TaxRateBp         int32
+	TaxTreatment      string
 }
 
 func (q *Queries) ListProducts(ctx context.Context, arg ListProductsParams) ([]ListProductsRow, error) {
@@ -430,6 +440,8 @@ func (q *Queries) ListProducts(ctx context.Context, arg ListProductsParams) ([]L
 			&i.TaxRateID,
 			&i.IsAvailable,
 			&i.KitchenRouted,
+			&i.InventoryItemID,
+			&i.StockUnitsPerSale,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.CategoryName,
@@ -519,18 +531,20 @@ func (q *Queries) UpdateModifier(ctx context.Context, arg UpdateModifierParams) 
 }
 
 const updateProduct = `-- name: UpdateProduct :exec
-UPDATE products SET category_id = $2, module = $3, name = $4, sku = $5, tax_rate_id = $6, kitchen_routed = $7, updated_at = now()
+UPDATE products SET category_id = $2, module = $3, name = $4, sku = $5, tax_rate_id = $6, kitchen_routed = $7, track_stock = $8::bigint IS NOT NULL, inventory_item_id = $8, stock_units_per_sale = $9, updated_at = now()
 WHERE id = $1
 `
 
 type UpdateProductParams struct {
-	ID            int64
-	CategoryID    int64
-	Module        string
-	Name          string
-	Sku           pgtype.Text
-	TaxRateID     int64
-	KitchenRouted bool
+	ID                int64
+	CategoryID        int64
+	Module            string
+	Name              string
+	Sku               pgtype.Text
+	TaxRateID         int64
+	KitchenRouted     bool
+	InventoryItemID   pgtype.Int8
+	StockUnitsPerSale int64
 }
 
 func (q *Queries) UpdateProduct(ctx context.Context, arg UpdateProductParams) error {
@@ -542,6 +556,8 @@ func (q *Queries) UpdateProduct(ctx context.Context, arg UpdateProductParams) er
 		arg.Sku,
 		arg.TaxRateID,
 		arg.KitchenRouted,
+		arg.InventoryItemID,
+		arg.StockUnitsPerSale,
 	)
 	return err
 }

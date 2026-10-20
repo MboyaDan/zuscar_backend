@@ -13,7 +13,7 @@ INSERT INTO categories (module, name, sort_order) VALUES ($1, $2, $3) RETURNING 
 UPDATE categories SET name = $2, sort_order = $3, active = $4 WHERE id = $1;
 
 -- name: ListProducts :many
-SELECT p.id, p.category_id, p.module, p.name, p.sku, p.price_cents, p.tax_rate_id, p.is_available, p.kitchen_routed,
+SELECT p.id, p.category_id, p.module, p.name, p.sku, p.price_cents, p.tax_rate_id, p.is_available, p.kitchen_routed, p.inventory_item_id, p.stock_units_per_sale,
        p.created_at, p.updated_at, c.name AS category_name,
        t.code AS tax_code, t.name AS tax_name, t.rate_bp AS tax_rate_bp, t.treatment AS tax_treatment
 FROM products p
@@ -26,7 +26,7 @@ WHERE (sqlc.narg('category_id')::bigint IS NULL OR p.category_id = sqlc.narg('ca
 ORDER BY c.module, c.sort_order, c.name, p.name, p.id;
 
 -- name: GetProduct :one
-SELECT p.id, p.category_id, p.module, p.name, p.sku, p.price_cents, p.tax_rate_id, p.is_available, p.kitchen_routed,
+SELECT p.id, p.category_id, p.module, p.name, p.sku, p.price_cents, p.tax_rate_id, p.is_available, p.kitchen_routed, p.inventory_item_id, p.stock_units_per_sale,
        p.created_at, p.updated_at, c.name AS category_name,
        t.code AS tax_code, t.name AS tax_name, t.rate_bp AS tax_rate_bp, t.treatment AS tax_treatment
 FROM products p
@@ -35,11 +35,11 @@ JOIN tax_rates t ON t.id = p.tax_rate_id
 WHERE p.id = $1;
 
 -- name: CreateProduct :one
-INSERT INTO products (category_id, module, name, sku, price_cents, tax_rate_id, kitchen_routed)
-VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id;
+INSERT INTO products (category_id, module, name, sku, price_cents, tax_rate_id, kitchen_routed, track_stock, inventory_item_id, stock_units_per_sale)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8::bigint IS NOT NULL, $8, $9) RETURNING id;
 
 -- name: UpdateProduct :exec
-UPDATE products SET category_id = $2, module = $3, name = $4, sku = $5, tax_rate_id = $6, kitchen_routed = $7, updated_at = now()
+UPDATE products SET category_id = $2, module = $3, name = $4, sku = $5, tax_rate_id = $6, kitchen_routed = $7, track_stock = $8::bigint IS NOT NULL, inventory_item_id = $8, stock_units_per_sale = $9, updated_at = now()
 WHERE id = $1;
 
 -- name: SetProductPrice :exec

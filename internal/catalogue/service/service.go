@@ -92,19 +92,22 @@ type TaxView struct {
 }
 
 type ProductView struct {
-	ID            int64     `json:"id"`
-	CategoryID    int64     `json:"category_id"`
-	CategoryName  string    `json:"category_name"`
-	Module        string    `json:"module"`
-	Name          string    `json:"name"`
-	SKU           *string   `json:"sku"`
-	PriceCents    int64     `json:"price_cents"`
-	TaxRate       TaxView   `json:"tax_rate"`
-	IsAvailable   bool      `json:"is_available"`
-	KitchenRouted bool      `json:"kitchen_routed"`
-	ModifierIDs   []int64   `json:"modifier_ids"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID            int64   `json:"id"`
+	CategoryID    int64   `json:"category_id"`
+	CategoryName  string  `json:"category_name"`
+	Module        string  `json:"module"`
+	Name          string  `json:"name"`
+	SKU           *string `json:"sku"`
+	PriceCents    int64   `json:"price_cents"`
+	TaxRate       TaxView `json:"tax_rate"`
+	IsAvailable   bool    `json:"is_available"`
+	KitchenRouted bool    `json:"kitchen_routed"`
+	// Stock link (Stage 17): each unit sold takes StockUnitsPerSale base units of the inventory item. Null means the product does not track stock.
+	InventoryItemID   *int64    `json:"inventory_item_id"`
+	StockUnitsPerSale int64     `json:"stock_units_per_sale"`
+	ModifierIDs       []int64   `json:"modifier_ids"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type PriceHistoryView struct {
@@ -130,7 +133,12 @@ func prodView(r repository.GetProductRow, mods []int64) ProductView {
 	if mods == nil {
 		mods = []int64{}
 	}
-	return ProductView{ID: r.ID, CategoryID: r.CategoryID, CategoryName: r.CategoryName, Module: r.Module, Name: r.Name, SKU: sku,
+	var inv *int64
+	if r.InventoryItemID.Valid {
+		v := r.InventoryItemID.Int64
+		inv = &v
+	}
+	return ProductView{InventoryItemID: inv, StockUnitsPerSale: r.StockUnitsPerSale, ID: r.ID, CategoryID: r.CategoryID, CategoryName: r.CategoryName, Module: r.Module, Name: r.Name, SKU: sku,
 		PriceCents: r.PriceCents, TaxRate: TaxView{ID: r.TaxRateID, Code: r.TaxCode, Name: r.TaxName, RateBP: r.TaxRateBp, Treatment: r.TaxTreatment},
 		IsAvailable: r.IsAvailable, KitchenRouted: r.KitchenRouted, ModifierIDs: mods, CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time}
 }
@@ -178,6 +186,22 @@ func skuText(v string) (pgtype.Text, error) {
 		return pgtype.Text{}, &ValidationError{Field: "sku", Msg: "must be 1 to 40 letters, digits, dot, dash or underscore"}
 	}
 	return pgtype.Text{String: v, Valid: true}, nil
+}
+
+// badItem turns "no such inventory item" (a foreign-key failure) into a field error on the product.
+func badItem(err error) error {
+	var pe *pgconn.PgError
+	if errors.As(err, &pe) && pe.Code == "23503" && pe.ConstraintName == "products_inventory_item_id_fkey" {
+		return &ValidationError{Field: "inventory_item_id", Msg: "does not exist"}
+	}
+	return nil
+}
+
+func checkPerSale(n int64) error {
+	if n < 1 || n > 1_000_000 {
+		return &ValidationError{Field: "stock_units_per_sale", Msg: "must be a whole number from 1 to 1,000,000"}
+	}
+	return nil
 }
 
 func conflict(err error) error {
@@ -541,6 +565,9 @@ type NewProduct struct {
 	TaxRateID     int64
 	KitchenRouted bool
 	ModifierIDs   []int64
+	// Optional stock link. StockUnitsPerSale 0 means 1.
+	InventoryItemID   *int64
+	StockUnitsPerSale int64
 }
 
 // CreateProduct adds a product in an active category (its module comes from the category). The opening price is
@@ -560,6 +587,17 @@ func (s *Service) CreateProduct(ctx context.Context, actor *auth.Principal, in N
 	if err := checkPrice("price_cents", in.PriceCents); err != nil {
 		return ProductView{}, err
 	}
+	per := in.StockUnitsPerSale
+	if per == 0 {
+		per = 1
+	}
+	if err := checkPerSale(per); err != nil {
+		return ProductView{}, err
+	}
+	invItem := pgtype.Int8{}
+	if in.InventoryItemID != nil {
+		invItem = pgtype.Int8{Int64: *in.InventoryItemID, Valid: true}
+	}
 	var out ProductView
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := repository.New(tx)
@@ -578,7 +616,7 @@ func (s *Service) CreateProduct(ctx context.Context, actor *auth.Principal, in N
 			return err
 		}
 		id, err := q.CreateProduct(ctx, repository.CreateProductParams{CategoryID: cat.ID, Module: cat.Module, Name: name, Sku: sku,
-			PriceCents: in.PriceCents, TaxRateID: in.TaxRateID, KitchenRouted: in.KitchenRouted})
+			PriceCents: in.PriceCents, TaxRateID: in.TaxRateID, KitchenRouted: in.KitchenRouted, InventoryItemID: invItem, StockUnitsPerSale: per})
 		if err != nil {
 			return err
 		}
@@ -589,7 +627,7 @@ func (s *Service) CreateProduct(ctx context.Context, actor *auth.Principal, in N
 			return err
 		}
 		after := map[string]any{"category_id": cat.ID, "module": cat.Module, "name": name, "sku": sku.String, "price_cents": in.PriceCents,
-			"tax_rate_id": in.TaxRateID, "kitchen_routed": in.KitchenRouted, "modifier_ids": mods}
+			"tax_rate_id": in.TaxRateID, "kitchen_routed": in.KitchenRouted, "modifier_ids": mods, "inventory_item_id": invItem.Int64, "stock_units_per_sale": per}
 		if err := s.record(ctx, tx, actor, m, "product.created", "product", id, nil, after); err != nil {
 			return err
 		}
@@ -598,6 +636,9 @@ func (s *Service) CreateProduct(ctx context.Context, actor *auth.Principal, in N
 	})
 	if c := conflict(err); c != nil {
 		return ProductView{}, c
+	}
+	if b := badItem(err); b != nil {
+		return ProductView{}, b
 	}
 	return out, err
 }
@@ -609,6 +650,15 @@ type ProductChange struct {
 	TaxRateID     *int64
 	KitchenRouted *bool
 	ModifierIDs   *[]int64
+	// InventoryItem: Set true with a nil Value unlinks stock tracking.
+	InventoryItem     NullableID
+	StockUnitsPerSale *int64
+}
+
+// NullableID tells "not sent" from "sent as null".
+type NullableID struct {
+	Set   bool
+	Value *int64
 }
 
 // UpdateProduct changes descriptive fields, never the price or availability (they have their own endpoints, so
@@ -661,6 +711,24 @@ func (s *Service) UpdateProduct(ctx context.Context, actor *auth.Principal, id i
 		if ch.KitchenRouted != nil {
 			kitchen = *ch.KitchenRouted
 		}
+		invItem := pgtype.Int8{}
+		if cur.InventoryItemID != nil {
+			invItem = pgtype.Int8{Int64: *cur.InventoryItemID, Valid: true}
+		}
+		per := cur.StockUnitsPerSale
+		if ch.InventoryItem.Set {
+			invItem = pgtype.Int8{}
+			if ch.InventoryItem.Value != nil {
+				invItem = pgtype.Int8{Int64: *ch.InventoryItem.Value, Valid: true}
+			}
+		}
+		if ch.StockUnitsPerSale != nil {
+			per = *ch.StockUnitsPerSale
+		}
+		if err := checkPerSale(per); err != nil {
+			return err
+		}
+		sameStock := invItem.Valid == (cur.InventoryItemID != nil) && (!invItem.Valid || invItem.Int64 == *cur.InventoryItemID) && per == cur.StockUnitsPerSale
 		mods := cur.ModifierIDs
 		if ch.ModifierIDs != nil {
 			if mods, err = s.checkModifiers(ctx, q, *ch.ModifierIDs); err != nil {
@@ -675,11 +743,11 @@ func (s *Service) UpdateProduct(ctx context.Context, actor *auth.Principal, id i
 		if cur.SKU != nil {
 			curSKU = *cur.SKU
 		}
-		if name == cur.Name && categoryID == cur.CategoryID && taxID == cur.TaxRate.ID && kitchen == cur.KitchenRouted && sku.String == curSKU && sameMods {
+		if name == cur.Name && categoryID == cur.CategoryID && taxID == cur.TaxRate.ID && kitchen == cur.KitchenRouted && sku.String == curSKU && sameMods && sameStock {
 			out = cur
 			return nil
 		}
-		if err := q.UpdateProduct(ctx, repository.UpdateProductParams{ID: id, CategoryID: categoryID, Module: cur.Module, Name: name, Sku: sku, TaxRateID: taxID, KitchenRouted: kitchen}); err != nil {
+		if err := q.UpdateProduct(ctx, repository.UpdateProductParams{ID: id, CategoryID: categoryID, Module: cur.Module, Name: name, Sku: sku, TaxRateID: taxID, KitchenRouted: kitchen, InventoryItemID: invItem, StockUnitsPerSale: per}); err != nil {
 			return err
 		}
 		if !sameMods {
@@ -687,8 +755,8 @@ func (s *Service) UpdateProduct(ctx context.Context, actor *auth.Principal, id i
 				return err
 			}
 		}
-		before := map[string]any{"category_id": cur.CategoryID, "name": cur.Name, "sku": curSKU, "tax_rate_id": cur.TaxRate.ID, "kitchen_routed": cur.KitchenRouted, "modifier_ids": cur.ModifierIDs}
-		after := map[string]any{"category_id": categoryID, "name": name, "sku": sku.String, "tax_rate_id": taxID, "kitchen_routed": kitchen, "modifier_ids": mods}
+		before := map[string]any{"category_id": cur.CategoryID, "name": cur.Name, "sku": curSKU, "tax_rate_id": cur.TaxRate.ID, "kitchen_routed": cur.KitchenRouted, "modifier_ids": cur.ModifierIDs, "inventory_item_id": cur.InventoryItemID, "stock_units_per_sale": cur.StockUnitsPerSale}
+		after := map[string]any{"category_id": categoryID, "name": name, "sku": sku.String, "tax_rate_id": taxID, "kitchen_routed": kitchen, "modifier_ids": mods, "inventory_item_id": invItem.Int64, "stock_units_per_sale": per}
 		if err := s.record(ctx, tx, actor, m, "product.updated", "product", id, before, after); err != nil {
 			return err
 		}
@@ -697,6 +765,9 @@ func (s *Service) UpdateProduct(ctx context.Context, actor *auth.Principal, id i
 	})
 	if c := conflict(err); c != nil {
 		return ProductView{}, c
+	}
+	if b := badItem(err); b != nil {
+		return ProductView{}, b
 	}
 	return out, err
 }
