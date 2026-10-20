@@ -3,6 +3,7 @@ package devseed
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -118,6 +119,38 @@ func seedTables(ctx context.Context, tx pgx.Tx) error {
 	for i, seats := range []int32{2, 2, 4, 4, 6, 8} {
 		if _, err := ordersrepo.New(tx).CreateTable(ctx, ordersrepo.CreateTableParams{Label: "Table " + string(rune('1'+i)), Seats: seats}); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// seedRooms adds three fake room types and thirteen rooms once; a database that already has any room is left alone.
+func seedRooms(ctx context.Context, tx pgx.Tx) error {
+	var n int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM rooms`).Scan(&n); err != nil || n > 0 {
+		return err
+	}
+	var tax int64
+	if err := tx.QueryRow(ctx, `SELECT id FROM tax_rates WHERE code = 'standard'`).Scan(&tax); err != nil {
+		return err
+	}
+	types := []struct {
+		name  string
+		rate  int64
+		seats int
+		rooms int
+	}{{"Standard", 650000, 2, 6}, {"Deluxe", 900000, 3, 5}, {"Suite", 1500000, 4, 2}}
+	no := 101
+	for _, t := range types {
+		var id int64
+		if err := tx.QueryRow(ctx, `INSERT INTO room_types (name, base_rate_cents, capacity, tax_rate_id) VALUES ($1, $2, $3, $4) RETURNING id`, t.name, t.rate, t.seats, tax).Scan(&id); err != nil {
+			return err
+		}
+		for i := 0; i < t.rooms; i++ {
+			if _, err := tx.Exec(ctx, `INSERT INTO rooms (number, room_type_id, floor) VALUES ($1, $2, $3)`, fmt.Sprint(no), id, 1+(no-101)/7); err != nil {
+				return err
+			}
+			no++
 		}
 	}
 	return nil

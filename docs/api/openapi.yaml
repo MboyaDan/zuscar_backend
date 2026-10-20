@@ -2640,6 +2640,281 @@ paths:
           description: OK
         '401': *id001
         '403': *id001
+  /api/v1/room-types:
+    get:
+      summary: List room types
+      description: 'Needs rooms.manage. ?active=true hides switched-off types. Each shows its nightly rate (tax included), capacity, tax category and how many active rooms it has.'
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: OK
+        '401': *id001
+        '403': *id001
+    post:
+      summary: Add a room type
+      description: 'Needs rooms.manage. base_rate_cents is per night, tax included, 0 to 10,000,000; capacity 1 to 12; tax_rate_id must be an active tax category. 409 duplicate_name.'
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [name, base_rate_cents, capacity, tax_rate_id], properties: {name: {type: string, maxLength: 60}, base_rate_cents: {type: integer, format: int64}, capacity: {type: integer, minimum: 1, maximum: 12}, tax_rate_id: {type: integer, format: int64}}}
+      responses:
+        '201':
+          description: Created
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '409': *id001
+  /api/v1/room-types/{id}:
+    patch:
+      summary: Change or switch off a room type
+      description: 'Needs rooms.manage. Any of name, base_rate_cents, capacity, tax_rate_id, active. Existing bookings keep the rate they were made at. 409 room_type_in_use while the type has active rooms.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, properties: {name: {type: string}, base_rate_cents: {type: integer, format: int64}, capacity: {type: integer}, tax_rate_id: {type: integer, format: int64}, active: {type: boolean}}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/rooms:
+    get:
+      summary: List rooms
+      description: 'Needs rooms.manage. Sorted by room number. ?active=true hides switched-off rooms. physical_status is the state on the floor (vacant_ready at first).'
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: OK
+        '401': *id001
+        '403': *id001
+    post:
+      summary: Add a room
+      description: 'Needs rooms.manage. The number of rooms is data: add as many as the building has. 409 duplicate_number.'
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [number, room_type_id], properties: {number: {type: string, maxLength: 10}, room_type_id: {type: integer, format: int64}, floor: {type: integer, minimum: -3, maximum: 60}}}
+      responses:
+        '201':
+          description: Created
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '409': *id001
+  /api/v1/rooms/{id}:
+    patch:
+      summary: Change or switch off a room
+      description: 'Needs rooms.manage. Any of number, room_type_id, floor (null clears it), active. 409 room_in_use when switching off a room that has bookings or a guest from today on.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, properties: {number: {type: string}, room_type_id: {type: integer, format: int64}, floor: {type: integer, nullable: true}, active: {type: boolean}}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/guests:
+    get:
+      summary: Find guests, newest first
+      description: 'Needs rooms.manage. ?q= matches part of a name or phone number; before_id and limit page the list.'
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+    post:
+      summary: Add a guest
+      description: 'Needs rooms.manage. Name is required; phone, email and notes are optional. No ID document number is collected (S-11).'
+      security:
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [full_name], properties: {full_name: {type: string, maxLength: 120}, phone: {type: string}, email: {type: string}, notes: {type: string, maxLength: 500}}}
+      responses:
+        '201':
+          description: Created
+        '400': *id001
+        '401': *id001
+        '403': *id001
+  /api/v1/guests/{id}:
+    patch:
+      summary: Change a guest
+      description: 'Needs rooms.manage. Any of full_name, phone, email, notes.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, properties: {full_name: {type: string}, phone: {type: string}, email: {type: string}, notes: {type: string}}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+  /api/v1/availability:
+    get:
+      summary: Which rooms are free for these nights
+      description: 'Needs rooms.manage. ?from=YYYY-MM-DD&to=YYYY-MM-DD (the night of to is not included); room_type_id optional. Lists active rooms that are not out of service, each with available, the booking that blocks it, and holds (tentative bookings, which do not block). A guide only: the database decides when a booking is made (409 room_unavailable).'
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+  /api/v1/reservations:
+    get:
+      summary: List bookings, newest first
+      description: 'Needs rooms.manage. Filters: status, room_id, guest_id, from and to (bookings that touch that window); before_id and limit page the list.'
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+    post:
+      summary: Make a booking
+      description: 'Needs rooms.manage. Give guest_id, or a guest object to add the guest in the same step. status is confirmed (default; holds the room) or tentative (a hold that does not block). check_in cannot be before today; at most 90 nights; adults 1 up to the room''s capacity; nightly_rate_cents defaults to the room type''s rate and is copied. The night of check_out is free for the next guest. 409 room_unavailable when another confirmed or checked-in booking has the room on any of those nights, even when two requests arrive together (AC-07). The Idempotency-Key header is optional: the same key with the same request returns the stored response (Idempotent-Replayed: true); the same key with a different request is 422 idempotency_key_reused.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: Idempotency-Key, in: header, required: false, schema: {type: string, minLength: 8, maxLength: 128}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [room_id, check_in, check_out], properties: {guest_id: {type: integer, format: int64}, guest: {type: object, required: [full_name], properties: {full_name: {type: string}, phone: {type: string}, email: {type: string}, notes: {type: string}}}, room_id: {type: integer, format: int64}, check_in: {type: string, format: date}, check_out: {type: string, format: date}, adults: {type: integer}, nightly_rate_cents: {type: integer, format: int64}, status: {type: string, enum: [tentative, confirmed]}, notes: {type: string, maxLength: 500}}}
+      responses:
+        '201':
+          description: Created
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '409': *id001
+        '422': *id001
+  /api/v1/reservations/{id}:
+    get:
+      summary: One booking
+      description: 'Needs rooms.manage. Includes nights and total_cents (nights x nightly rate, tax included).'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      responses:
+        '200':
+          description: OK
+        '401': *id001
+        '403': *id001
+        '404': *id001
+    patch:
+      summary: Change a booking
+      description: 'Needs rooms.manage. Any of guest_id, room_id, check_in, check_out, adults, nightly_rate_cents, notes, while the booking is tentative or confirmed. Moving it is held to the same overlap rule (409 room_unavailable). 409 reservation_closed once it is cancelled, no-show or checked out; 409 reservation_in_house for a guest in the house.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, properties: {guest_id: {type: integer, format: int64}, room_id: {type: integer, format: int64}, check_in: {type: string, format: date}, check_out: {type: string, format: date}, adults: {type: integer}, nightly_rate_cents: {type: integer, format: int64}, notes: {type: string}}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/reservations/{id}/confirm:
+    post:
+      summary: Turn a hold into a booking
+      description: 'Needs rooms.manage. 409 room_unavailable if the room was booked meanwhile, already_confirmed, reservation_closed, reservation_past.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      responses:
+        '200':
+          description: OK
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/reservations/{id}/cancel:
+    post:
+      summary: Cancel a booking
+      description: 'Needs rooms.manage. A reason is required (up to 200 characters). Frees the room. 409 reservation_closed if already ended, reservation_in_house for a guest in the house.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [reason], properties: {reason: {type: string, maxLength: 200}}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
+  /api/v1/reservations/{id}/no-show:
+    post:
+      summary: Mark a confirmed guest as not arrived
+      description: 'Needs rooms.manage. Allowed from the arrival date on (409 too_early before it). Frees the room.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      responses:
+        '200':
+          description: OK
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
 components:
   securitySchemes:
     sessionCookie:

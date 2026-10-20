@@ -93,6 +93,8 @@ stateDiagram-v2
 ```
 Blocking statuses are confirmed and checked_in (DQ-09 default); the exclusion constraint on (room, [check_in, check_out)) rejects any second blocking row, so concurrent attempts cannot both succeed (AC-07, spiked). Overlap violation maps to 409 `room_unavailable`. Check-in needs the room physically vacant_ready or reserved and the date window valid; it creates the stay and the folio. Stay extension is an update of check_out under the same constraint.
 
+Stage 22 builds the part before arrival: making a booking (confirmed, or tentative as a hold), changing it, confirming a hold, cancelling with a reason and marking no-show (from the arrival date on). A change of room or dates is held to the same overlap rule as a new booking. The nightly rate is copied at booking time (S-94). Check-in, the stay and the folio are Stage 23.
+
 ## 6. Room (physical status)
 ```mermaid
 stateDiagram-v2
