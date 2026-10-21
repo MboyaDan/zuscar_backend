@@ -3302,6 +3302,95 @@ paths:
         '400': *id001
         '401': *id001
         '403': *id001
+  /api/v1/reports/expenses-profit:
+    get:
+      summary: Report - expenses and estimated profit
+      description: 'Needs reports.view. Sales before tax, less stock received and expenses (the expenses ledger plus cash expenses entered on shifts, each counted once), by kind and one by one. An estimate: it uses stock that arrived, not stock sold (S-111). Not for cashiers. from and to are business dates (default today, at most 366 days). format=csv needs reports.export and is audited.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: from, in: query, required: false, schema: {type: string, format: date}}
+      - {name: to, in: query, required: false, schema: {type: string, format: date}}
+      - {name: format, in: query, required: false, schema: {type: string, enum: [json, csv]}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+  /api/v1/reports/day-close:
+    get:
+      summary: Report - end-of-day closing summary
+      description: 'Needs reports.view. One business day (default today; from and to, if both are sent, must be the same day): sales, money received by method, money paid back, discounts, refunds and voids, cashier shifts with cash expected, counted and over or short, cash put in and taken out, expenses, and the rooms. Not for cashiers. format=csv needs reports.export and is audited.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: from, in: query, required: false, schema: {type: string, format: date}}
+      - {name: to, in: query, required: false, schema: {type: string, format: date}}
+      - {name: format, in: query, required: false, schema: {type: string, enum: [json, csv]}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+  /api/v1/expenses:
+    get:
+      summary: List expenses, newest first
+      description: 'Needs expenses.manage. from and to are business dates (default the last 30 days, at most 366 days); include_voided=true also lists voided entries; limit up to 200. The answer also carries the allowed categories and ways of paying, and more=true when the list was cut short.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: from, in: query, required: false, schema: {type: string, format: date}}
+      - {name: to, in: query, required: false, schema: {type: string, format: date}}
+      - {name: include_voided, in: query, required: false, schema: {type: boolean}}
+      - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+    post:
+      summary: Record an expense
+      description: 'Needs expenses.manage and the Idempotency-Key header. expense_date is a business date, today or earlier and at most 400 days back; amount_cents is greater than 0; category is one of rent, utilities, wages, transport, repairs, supplies, licences, marketing, other; paid_with is cash, mpesa, bank, card or other; paid_by is free text (who handed the money over). An entry is never edited; void it and enter a new one. Cash taken from a till drawer is entered on the shift instead (S-111).'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: Idempotency-Key, in: header, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [expense_date, description, category, amount_cents, paid_by, paid_with], properties: {expense_date: {type: string, format: date}, description: {type: string, maxLength: 200}, category: {type: string}, amount_cents: {type: integer, format: int64, minimum: 1}, paid_by: {type: string, maxLength: 80}, paid_with: {type: string}}}
+      responses:
+        '201':
+          description: Created
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '422': *id001
+  /api/v1/expenses/{id}/void:
+    post:
+      summary: Void an expense entered by mistake
+      description: 'Needs expenses.manage. A reason is required (1 to 200 characters). The entry stays on record with who voided it and why, and leaves every total. 404 not_found, 409 already_voided.'
+      security:
+      - sessionCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [reason], properties: {reason: {type: string, maxLength: 200}}}
+      responses:
+        '200':
+          description: OK
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '404': *id001
+        '409': *id001
 components:
   securitySchemes:
     sessionCookie:

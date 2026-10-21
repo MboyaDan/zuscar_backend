@@ -11,6 +11,44 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const cashMovementsOnDay = `-- name: CashMovementsOnDay :many
+SELECT cm.kind, count(*)::bigint AS entries, COALESCE(sum(cm.amount_cents), 0)::bigint AS amount_cents
+FROM cash_movements cm
+WHERE (cm.created_at AT TIME ZONE $1::text)::date = $2::date
+GROUP BY cm.kind ORDER BY cm.kind
+`
+
+type CashMovementsOnDayParams struct {
+	Tz  string
+	Day pgtype.Date
+}
+
+type CashMovementsOnDayRow struct {
+	Kind        string
+	Entries     int64
+	AmountCents int64
+}
+
+func (q *Queries) CashMovementsOnDay(ctx context.Context, arg CashMovementsOnDayParams) ([]CashMovementsOnDayRow, error) {
+	rows, err := q.db.Query(ctx, cashMovementsOnDay, arg.Tz, arg.Day)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CashMovementsOnDayRow
+	for rows.Next() {
+		var i CashMovementsOnDayRow
+		if err := rows.Scan(&i.Kind, &i.Entries, &i.AmountCents); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const collectionsByMethod = `-- name: CollectionsByMethod :many
 SELECT (p.confirmed_at AT TIME ZONE $1::text)::date AS day, p.method, p.purpose, count(*)::bigint AS payments, COALESCE(sum(p.amount_cents), 0)::bigint AS amount_cents
 FROM payments p
@@ -113,6 +151,141 @@ func (q *Queries) DiscountLines(ctx context.Context, arg DiscountLinesParams) ([
 			&i.ApprovedBy,
 			&i.CashierName,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const drawerExpenses = `-- name: DrawerExpenses :many
+SELECT (cm.created_at AT TIME ZONE $1::text)::date AS day, cm.reason, u.display_name AS paid_by, cm.amount_cents
+FROM cash_movements cm JOIN users u ON u.id = cm.created_by
+WHERE cm.kind = 'expense'
+  AND (cm.created_at AT TIME ZONE $1::text)::date BETWEEN $2::date AND $3::date
+ORDER BY cm.created_at, cm.id
+`
+
+type DrawerExpensesParams struct {
+	Tz      string
+	FromDay pgtype.Date
+	ToDay   pgtype.Date
+}
+
+type DrawerExpensesRow struct {
+	Day         pgtype.Date
+	Reason      string
+	PaidBy      string
+	AmountCents int64
+}
+
+// Cash taken from a drawer and entered on the shift as an expense. The day is the business date the movement was made.
+func (q *Queries) DrawerExpenses(ctx context.Context, arg DrawerExpensesParams) ([]DrawerExpensesRow, error) {
+	rows, err := q.db.Query(ctx, drawerExpenses, arg.Tz, arg.FromDay, arg.ToDay)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []DrawerExpensesRow
+	for rows.Next() {
+		var i DrawerExpensesRow
+		if err := rows.Scan(
+			&i.Day,
+			&i.Reason,
+			&i.PaidBy,
+			&i.AmountCents,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const expenseRows = `-- name: ExpenseRows :many
+SELECT e.expense_date, e.description, e.category, e.paid_by, e.paid_with, e.amount_cents
+FROM expenses e
+WHERE e.voided_at IS NULL AND e.expense_date BETWEEN $1::date AND $2::date
+ORDER BY e.expense_date, e.id
+`
+
+type ExpenseRowsParams struct {
+	FromDay pgtype.Date
+	ToDay   pgtype.Date
+}
+
+type ExpenseRowsRow struct {
+	ExpenseDate pgtype.Date
+	Description string
+	Category    string
+	PaidBy      string
+	PaidWith    string
+	AmountCents int64
+}
+
+func (q *Queries) ExpenseRows(ctx context.Context, arg ExpenseRowsParams) ([]ExpenseRowsRow, error) {
+	rows, err := q.db.Query(ctx, expenseRows, arg.FromDay, arg.ToDay)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ExpenseRowsRow
+	for rows.Next() {
+		var i ExpenseRowsRow
+		if err := rows.Scan(
+			&i.ExpenseDate,
+			&i.Description,
+			&i.Category,
+			&i.PaidBy,
+			&i.PaidWith,
+			&i.AmountCents,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const expensesByCategory = `-- name: ExpensesByCategory :many
+
+SELECT e.category, count(*)::bigint AS entries, COALESCE(sum(e.amount_cents), 0)::bigint AS amount_cents
+FROM expenses e
+WHERE e.voided_at IS NULL AND e.expense_date BETWEEN $1::date AND $2::date
+GROUP BY e.category ORDER BY e.category
+`
+
+type ExpensesByCategoryParams struct {
+	FromDay pgtype.Date
+	ToDay   pgtype.Date
+}
+
+type ExpensesByCategoryRow struct {
+	Category    string
+	Entries     int64
+	AmountCents int64
+}
+
+// Stage 26: expenses, profit and the day-close sheet.
+func (q *Queries) ExpensesByCategory(ctx context.Context, arg ExpensesByCategoryParams) ([]ExpensesByCategoryRow, error) {
+	rows, err := q.db.Query(ctx, expensesByCategory, arg.FromDay, arg.ToDay)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ExpensesByCategoryRow
+	for rows.Next() {
+		var i ExpensesByCategoryRow
+		if err := rows.Scan(&i.Category, &i.Entries, &i.AmountCents); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -379,6 +552,29 @@ func (q *Queries) ReturnsByDay(ctx context.Context, arg ReturnsByDayParams) ([]R
 		return nil, err
 	}
 	return items, nil
+}
+
+const returnsTotals = `-- name: ReturnsTotals :one
+SELECT COALESCE(sum(r.amount_cents), 0)::bigint AS amount_cents, COALESCE(sum(r.tax_cents), 0)::bigint AS tax_cents
+FROM refunds r
+WHERE r.business_date BETWEEN $1::date AND $2::date
+`
+
+type ReturnsTotalsParams struct {
+	FromDay pgtype.Date
+	ToDay   pgtype.Date
+}
+
+type ReturnsTotalsRow struct {
+	AmountCents int64
+	TaxCents    int64
+}
+
+func (q *Queries) ReturnsTotals(ctx context.Context, arg ReturnsTotalsParams) (ReturnsTotalsRow, error) {
+	row := q.db.QueryRow(ctx, returnsTotals, arg.FromDay, arg.ToDay)
+	var i ReturnsTotalsRow
+	err := row.Scan(&i.AmountCents, &i.TaxCents)
+	return i, err
 }
 
 const roomNights = `-- name: RoomNights :many
@@ -654,6 +850,79 @@ func (q *Queries) SalesDue(ctx context.Context) ([]SalesDueRow, error) {
 	return items, nil
 }
 
+const salesTotals = `-- name: SalesTotals :one
+SELECT COALESCE(sum(s.total_cents), 0)::bigint AS total_cents, COALESCE(sum(s.tax_cents), 0)::bigint AS tax_cents
+FROM sales s
+WHERE s.business_date BETWEEN $1::date AND $2::date
+`
+
+type SalesTotalsParams struct {
+	FromDay pgtype.Date
+	ToDay   pgtype.Date
+}
+
+type SalesTotalsRow struct {
+	TotalCents int64
+	TaxCents   int64
+}
+
+func (q *Queries) SalesTotals(ctx context.Context, arg SalesTotalsParams) (SalesTotalsRow, error) {
+	row := q.db.QueryRow(ctx, salesTotals, arg.FromDay, arg.ToDay)
+	var i SalesTotalsRow
+	err := row.Scan(&i.TotalCents, &i.TaxCents)
+	return i, err
+}
+
+const shiftsOnDay = `-- name: ShiftsOnDay :many
+SELECT sh.id, u.display_name AS cashier, sh.status, sh.opening_float_cents, sh.declared_cash_cents, sh.expected_cash_cents, sh.variance_cents
+FROM cashier_shifts sh JOIN users u ON u.id = sh.user_id
+WHERE (sh.opened_at AT TIME ZONE $1::text)::date = $2::date
+ORDER BY sh.opened_at, sh.id
+`
+
+type ShiftsOnDayParams struct {
+	Tz  string
+	Day pgtype.Date
+}
+
+type ShiftsOnDayRow struct {
+	ID                int64
+	Cashier           string
+	Status            string
+	OpeningFloatCents int64
+	DeclaredCashCents pgtype.Int8
+	ExpectedCashCents pgtype.Int8
+	VarianceCents     pgtype.Int8
+}
+
+func (q *Queries) ShiftsOnDay(ctx context.Context, arg ShiftsOnDayParams) ([]ShiftsOnDayRow, error) {
+	rows, err := q.db.Query(ctx, shiftsOnDay, arg.Tz, arg.Day)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ShiftsOnDayRow
+	for rows.Next() {
+		var i ShiftsOnDayRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Cashier,
+			&i.Status,
+			&i.OpeningFloatCents,
+			&i.DeclaredCashCents,
+			&i.ExpectedCashCents,
+			&i.VarianceCents,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const stockOnHand = `-- name: StockOnHand :many
 SELECT i.id AS item_id, i.name AS item_name, u.code AS unit_code, l.id AS location_id, l.name AS location_name, COALESCE(b.qty_base, 0)::bigint AS qty_base,
        COALESCE(i.low_stock_threshold, -1)::bigint AS low_threshold,
@@ -696,6 +965,48 @@ func (q *Queries) StockOnHand(ctx context.Context) ([]StockOnHandRow, error) {
 			&i.LowThreshold,
 			&i.ItemTotal,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const stockReceivedByDay = `-- name: StockReceivedByDay :many
+SELECT (p.received_at AT TIME ZONE $1::text)::date AS day, count(DISTINCT p.id)::bigint AS purchases,
+       COALESCE(sum(pi.received_qty * pi.received_unit_cost_cents), 0)::bigint AS cost_cents
+FROM purchases p JOIN purchase_items pi ON pi.purchase_id = p.id
+WHERE p.status = 'received'
+  AND (p.received_at AT TIME ZONE $1::text)::date BETWEEN $2::date AND $3::date
+GROUP BY 1 ORDER BY 1
+`
+
+type StockReceivedByDayParams struct {
+	Tz      string
+	FromDay pgtype.Date
+	ToDay   pgtype.Date
+}
+
+type StockReceivedByDayRow struct {
+	Day       pgtype.Date
+	Purchases int64
+	CostCents int64
+}
+
+// Stock that arrived, valued at what the delivery really cost, on the day it was received.
+func (q *Queries) StockReceivedByDay(ctx context.Context, arg StockReceivedByDayParams) ([]StockReceivedByDayRow, error) {
+	rows, err := q.db.Query(ctx, stockReceivedByDay, arg.Tz, arg.FromDay, arg.ToDay)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []StockReceivedByDayRow
+	for rows.Next() {
+		var i StockReceivedByDayRow
+		if err := rows.Scan(&i.Day, &i.Purchases, &i.CostCents); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

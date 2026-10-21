@@ -191,3 +191,9 @@ Stock counts and low stock (Stage 21, S-89 to S-92): a count is a sheet for one 
 - Sales and collections can be limited to one cashier; a cashier-only user gets their own. Other reports are 403 for them. CSV needs `reports.export` and writes a `report.exported` audit event; a refused export writes nothing.
 - Money in JSON is integer cents. In CSV it is KES with two decimals, occupancy is a percentage, and a text value that starts with `=`, `+`, `-` or `@` is prefixed with an apostrophe so a spreadsheet does not run it.
 - Collections count confirmed payments only, on the Nairobi day they were confirmed (AC-20). Unconfirmed payments are listed apart.
+
+### Expenses, estimated profit and the closing summary (Stage 26)
+
+- `POST /expenses` (expenses.manage, Idempotency-Key) writes date, description, kind, amount in cents, who paid and how paid. A retry with the same key returns the first answer and adds nothing. `POST /expenses/{id}/void` needs a reason and keeps the row; a voided expense is out of every total. `GET /expenses` lists the last 30 days by default (`from`, `to`, `include_voided`, `limit`). The database refuses any edit other than the one-time void, and any delete.
+- Cash taken from a till drawer is a shift cash movement of kind `expense` (S-57). The profit report reads both tables and counts each once (S-111).
+- `GET /reports/expenses-profit`: sales before tax, less stock received and expenses, with spending by kind and the full list (S-112). `GET /reports/day-close`: one business day on one sheet (S-114). Both need `reports.view`, are refused to cashier-only users, and download as CSV with `reports.export` (audited).
