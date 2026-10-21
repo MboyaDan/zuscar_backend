@@ -143,9 +143,10 @@ func TestAC17_TwoClerksEnteringTheSameReceiptAtOnce(t *testing.T) {
 func TestAC17_RetryWithSameKeyReplays(t *testing.T) {
 	k := newKitchenEnv(t)
 	key := newKey()
-	w1 := k.enter(k.mgr, key, k.paper("K-1"))
+	body := k.paper("K-1") // built once: it carries the current time, so two calls could differ across a second boundary
+	w1 := k.enter(k.mgr, key, body)
 	expect(t, w1, 201, "")
-	w2 := k.enter(k.mgr, key, k.paper("K-1"))
+	w2 := k.enter(k.mgr, key, body)
 	expect(t, w2, 201, "")
 	if w2.Header().Get("Idempotent-Replayed") != "true" || decodeInto[outageResp](t, w1).Sale.ID != decodeInto[outageResp](t, w2).Sale.ID {
 		t.Fatal("a retry with the same key should return the stored sale")

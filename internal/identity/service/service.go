@@ -307,7 +307,7 @@ func (s *Service) Authenticate(ctx context.Context, token string) (*auth.Princip
 	}
 	now := s.clock.Now()
 	q := repository.New(s.pool)
-	row, err := q.GetSessionByTokenHash(ctx, hashToken(token))
+	row, err := q.GetSessionPrincipal(ctx, hashToken(token))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrUnauthenticated
 	}
@@ -328,14 +328,6 @@ func (s *Service) Authenticate(ctx context.Context, token string) (*auth.Princip
 			return nil, err
 		}
 	}
-	roles, err := q.ListRolesForUser(ctx, row.UserID)
-	if err != nil {
-		return nil, err
-	}
-	keys, err := q.ListPermissionKeysForUser(ctx, row.UserID)
-	if err != nil {
-		return nil, err
-	}
 	p := &auth.Principal{
 		UserID: row.UserID, Username: row.Username, DisplayName: row.DisplayName, SessionID: row.SessionID,
 		AuthMethod: row.AuthMethod, MustChangePassword: row.MustChangePassword, CSRFHash: row.CsrfHash,
@@ -345,10 +337,8 @@ func (s *Service) Authenticate(ctx context.Context, token string) (*auth.Princip
 		t := row.ReauthAt.Time
 		p.ReauthAt = &t
 	}
-	for _, r := range roles {
-		p.Roles = append(p.Roles, r.Code)
-	}
-	for _, k := range keys {
+	p.Roles = append(p.Roles, row.RoleCodes...)
+	for _, k := range row.PermissionKeys {
 		p.Permissions[k] = true
 	}
 	return p, nil
