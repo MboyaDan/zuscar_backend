@@ -11,6 +11,12 @@ set -euo pipefail
 
 : "${DATABASE_URL:?DATABASE_URL is required}"
 : "${BACKUP_PASSPHRASE:?BACKUP_PASSPHRASE is required}"
+# A secret pasted into GitHub often carries a hidden line break or space at the end, which breaks the connection string
+# ("invalid sslmode value"). A connection string never contains whitespace, so take it all out. The passphrase loses
+# only its ends, so a passphrase with spaces inside still works.
+DATABASE_URL="$(printf '%s' "$DATABASE_URL" | tr -d '[:space:]')"
+BACKUP_PASSPHRASE="$(printf '%s' "$BACKUP_PASSPHRASE" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+RESTORE_URL="$(printf '%s' "${RESTORE_URL:-}" | tr -d '[:space:]')"
 OUT_DIR="${OUT_DIR:-./backup-out}"
 stamp="$(date -u +%Y%m%d-%H%M%SZ)"
 work="$(mktemp -d)"
