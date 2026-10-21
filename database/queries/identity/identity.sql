@@ -78,9 +78,17 @@ DELETE FROM login_attempts WHERE attempted_at < $1;
 INSERT INTO sessions (user_id, token_hash, csrf_hash, auth_method, created_at, last_seen_at, idle_expires_at, absolute_expires_at, ip, user_agent)
 VALUES ($1, $2, $3, $4, $5, $5, $6, $7, $8, $9) RETURNING id;
 
--- name: GetSessionByTokenHash :one
+-- name: GetSessionPrincipal :one
+-- The session, its user, and the user's roles and permissions in ONE round trip. This runs on every request, and each
+-- separate query is a network hop between the API host and the database. Roles and permissions are still read now,
+-- never cached, so a change applies on the next request.
 SELECT s.id AS session_id, s.user_id, s.csrf_hash, s.auth_method, s.last_seen_at, s.idle_expires_at, s.absolute_expires_at, s.reauth_at,
-       u.username, u.display_name, u.must_change_password
+       u.username, u.display_name, u.must_change_password,
+       ARRAY(SELECT r.code FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = s.user_id ORDER BY r.code)::text[] AS role_codes,
+       ARRAY(SELECT DISTINCT p.key FROM user_roles ur
+             JOIN role_permissions rp ON rp.role_id = ur.role_id
+             JOIN permissions p ON p.id = rp.permission_id
+             WHERE ur.user_id = s.user_id ORDER BY p.key)::text[] AS permission_keys
 FROM sessions s JOIN users u ON u.id = s.user_id
 WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND u.status = 'active';
 

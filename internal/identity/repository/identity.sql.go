@@ -306,14 +306,19 @@ func (q *Queries) GetRoleIDByCode(ctx context.Context, code string) (int64, erro
 	return id, err
 }
 
-const getSessionByTokenHash = `-- name: GetSessionByTokenHash :one
+const getSessionPrincipal = `-- name: GetSessionPrincipal :one
 SELECT s.id AS session_id, s.user_id, s.csrf_hash, s.auth_method, s.last_seen_at, s.idle_expires_at, s.absolute_expires_at, s.reauth_at,
-       u.username, u.display_name, u.must_change_password
+       u.username, u.display_name, u.must_change_password,
+       ARRAY(SELECT r.code FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = s.user_id ORDER BY r.code)::text[] AS role_codes,
+       ARRAY(SELECT DISTINCT p.key FROM user_roles ur
+             JOIN role_permissions rp ON rp.role_id = ur.role_id
+             JOIN permissions p ON p.id = rp.permission_id
+             WHERE ur.user_id = s.user_id ORDER BY p.key)::text[] AS permission_keys
 FROM sessions s JOIN users u ON u.id = s.user_id
 WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND u.status = 'active'
 `
 
-type GetSessionByTokenHashRow struct {
+type GetSessionPrincipalRow struct {
 	SessionID          int64
 	UserID             int64
 	CsrfHash           []byte
@@ -325,11 +330,16 @@ type GetSessionByTokenHashRow struct {
 	Username           string
 	DisplayName        string
 	MustChangePassword bool
+	RoleCodes          []string
+	PermissionKeys     []string
 }
 
-func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (GetSessionByTokenHashRow, error) {
-	row := q.db.QueryRow(ctx, getSessionByTokenHash, tokenHash)
-	var i GetSessionByTokenHashRow
+// The session, its user, and the user's roles and permissions in ONE round trip. This runs on every request, and each
+// separate query is a network hop between the API host and the database. Roles and permissions are still read now,
+// never cached, so a change applies on the next request.
+func (q *Queries) GetSessionPrincipal(ctx context.Context, tokenHash []byte) (GetSessionPrincipalRow, error) {
+	row := q.db.QueryRow(ctx, getSessionPrincipal, tokenHash)
+	var i GetSessionPrincipalRow
 	err := row.Scan(
 		&i.SessionID,
 		&i.UserID,
@@ -342,6 +352,8 @@ func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (
 		&i.Username,
 		&i.DisplayName,
 		&i.MustChangePassword,
+		&i.RoleCodes,
+		&i.PermissionKeys,
 	)
 	return i, err
 }
