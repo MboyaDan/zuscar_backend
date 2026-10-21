@@ -1,0 +1,49 @@
+# Daily encrypted backup of the production database, with a restore check every time (docs/runbooks/backup-restore.md).
+# Secrets needed (repository Settings, Secrets and variables, Actions):
+#   PROD_DATABASE_URL    the Supabase SESSION POOLER string (GitHub runners are IPv4, so not the direct string)
+#   BACKUP_PASSPHRASE    the passphrase that encrypts the file; also keep it in your password manager
+# UNVERIFIED: this workflow has not run on GitHub yet. Run it once by hand (Actions, backup, Run workflow) and read the log.
+name: backup
+on:
+  schedule:
+    - cron: "0 21 * * *" # 21:00 UTC is midnight in Nairobi
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: backup
+  cancel-in-progress: false
+jobs:
+  backup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      scratch:
+        image: postgres:17
+        env: { POSTGRES_USER: scratch, POSTGRES_PASSWORD: scratch-only, POSTGRES_DB: scratch }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U scratch" --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PostgreSQL 17 client tools
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -q
+          sudo apt-get install -y -q postgresql-client-17
+          pg_dump --version
+      - name: Back up and check the restore
+        env:
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+          RESTORE_URL: postgres://scratch:scratch-only@localhost:5432/scratch
+          OUT_DIR: backup-out
+        run: ./scripts/backup/backup.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zuscar-backup-${{ github.run_id }}
+          path: backup-out/*.gpg
+          retention-days: 30
+          if-no-files-found: error
