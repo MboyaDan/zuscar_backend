@@ -33,14 +33,19 @@ jobs:
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -q
           sudo apt-get install -y -q postgresql-client-17
-          pg_dump --version
+          # The runner already has PostgreSQL 16 tools first on the PATH, and pg_dump refuses a server newer than itself.
+          # Put the 17 tools in front for every later step.
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+          /usr/lib/postgresql/17/bin/pg_dump --version
       - name: Back up and check the restore
         env:
           DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
           BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
           RESTORE_URL: postgres://scratch:scratch-only@localhost:5432/scratch
           OUT_DIR: backup-out
-        run: ./scripts/backup/backup.sh
+        run: |
+          which pg_dump && pg_dump --version
+          ./scripts/backup/backup.sh
       - uses: actions/upload-artifact@v4
         with:
           name: zuscar-backup-${{ github.run_id }}
