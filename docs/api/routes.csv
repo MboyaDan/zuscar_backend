@@ -156,7 +156,11 @@ GET,/api/v1/reports/balances-due,reports.view,-,21,?format=csv needs reports.exp
 GET,/api/v1/reports/discounts-voids-refunds,reports.view,-,21,?format=csv needs reports.export and is audited
 GET,/api/v1/reports/stock,reports.view,-,21,?format=csv needs reports.export and is audited
 GET,/api/v1/reports/rooms,reports.view,-,21,?format=csv needs reports.export and is audited
-GET,/api/v1/reports/expenses-profit,reports.view,-,23,?format=csv needs reports.export and is audited
+GET,/api/v1/reports/expenses-profit,reports.view,-,21,?format=csv needs reports.export and is audited
+GET,/api/v1/reports/day-close,reports.view,-,21,one business day; ?format=csv needs reports.export and is audited
+GET,/api/v1/expenses,expenses.manage,-,21,"default last 30 days; from, to, include_voided, limit"
+POST,/api/v1/expenses,expenses.manage,Y,21,"date, what, amount, who paid, how paid; never edited"
+POST,/api/v1/expenses/{id}/void,expenses.manage,-,21,reason required; the entry stays on record
 GET,/api/v1/integrations/tax-invoices,reports.view,-,24,"stub, status only (DG-01)"
 POST,/api/v1/integrations/mpesa/callback,provider authenticity (unspecified),-,gated,NOT BUILT until DG-02 verified
 POST,/api/v1/integrations/etims/submit,system,-,gated,NOT BUILT until DG-01 verified

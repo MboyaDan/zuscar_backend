@@ -77,6 +77,21 @@ type DocumentCounter struct {
 	UpdatedAt pgtype.Timestamptz
 }
 
+type Expense struct {
+	ID          int64
+	ExpenseDate pgtype.Date
+	Description string
+	Category    string
+	AmountCents int64
+	PaidBy      string
+	PaidWith    string
+	CreatedBy   int64
+	CreatedAt   pgtype.Timestamptz
+	VoidedAt    pgtype.Timestamptz
+	VoidedBy    pgtype.Int8
+	VoidReason  pgtype.Text
+}
+
 type FolioItem struct {
 	ID             int64
 	FolioID        int64
@@ -293,6 +308,35 @@ type ProductModifier struct {
 	ModifierID int64
 }
 
+type Purchase struct {
+	ID          int64
+	PurchaseNo  int64
+	SupplierID  int64
+	Status      string
+	InvoiceRef  pgtype.Text
+	Note        pgtype.Text
+	LocationID  pgtype.Int8
+	CreatedBy   int64
+	CreatedAt   pgtype.Timestamptz
+	ReceivedBy  pgtype.Int8
+	ReceivedAt  pgtype.Timestamptz
+	CancelledBy pgtype.Int8
+	CancelledAt pgtype.Timestamptz
+}
+
+type PurchaseItem struct {
+	ID                    int64
+	PurchaseID            int64
+	ItemID                int64
+	EnteredQty            int64
+	EnteredUnitID         int64
+	QtyBase               int64
+	UnitCostCents         int64
+	ReceivedQty           pgtype.Int8
+	ReceivedQtyBase       pgtype.Int8
+	ReceivedUnitCostCents pgtype.Int8
+}
+
 type Refund struct {
 	ID           int64
 	RefundNo     int64
@@ -479,6 +523,15 @@ type StockLocation struct {
 	Name      string
 	Active    bool
 	CreatedAt pgtype.Timestamptz
+}
+
+type Supplier struct {
+	ID        int64
+	Name      string
+	Contact   pgtype.Text
+	Active    bool
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
 }
 
 type SystemSetting struct {

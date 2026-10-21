@@ -84,7 +84,7 @@ type Report struct {
 }
 
 // Names are the reports that exist; a name outside this list is a 404.
-var Names = []string{"sales", "collections", "balances-due", "discounts-voids-refunds", "stock", "rooms"}
+var Names = []string{"sales", "collections", "balances-due", "discounts-voids-refunds", "stock", "rooms", "expenses-profit", "day-close"}
 
 const maxDays = 366
 
@@ -202,6 +202,10 @@ func (s *Service) Build(ctx context.Context, actor *auth.Principal, name, from, 
 		r, err = s.stock(ctx, q)
 	case "rooms":
 		r, err = s.rooms(ctx, q, f, t, loc)
+	case "expenses-profit":
+		r, err = s.expensesProfit(ctx, q, f, t, zone)
+	case "day-close":
+		r, err = s.dayClose(ctx, q, f, t, zone, loc)
 	}
 	if err != nil {
 		return Report{}, err

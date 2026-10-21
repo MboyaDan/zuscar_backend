@@ -41,6 +41,7 @@ Role codes: `super_admin`, `business_manager`, `cashier`, `waiter`, `bartender`,
 | `inventory.wastage*` | · | ● | · | · | ◐3 | · | ● | ◐3 | · |
 | `inventory.override_negative*` | · | ● | · | · | · | · | · | · | · |
 | `purchasing.manage` | · | ● | · | · | · | · | ● | · | · |
+| `expenses.manage` | · | ● | · | · | · | · | · | · | · |
 | `rooms.view*` | · | ● | ◐4 | ◐4 | ◐4 | ● | · | · | ● |
 | `rooms.manage` | · | ● | · | · | · | ● | · | · | · |
 | `folios.view*` | · | ● | · | · | · | ● | · | · | ● |

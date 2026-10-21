@@ -18,8 +18,8 @@ func TestCatalogInternallyConsistent(t *testing.T) {
 		}
 		keys[p.Key] = true
 	}
-	if len(keys) != 34 {
-		t.Errorf("expected 34 permissions, have %d", len(keys))
+	if len(keys) != 35 {
+		t.Errorf("expected 35 permissions, have %d", len(keys))
 	}
 	codes := map[string]bool{}
 	for _, r := range Roles {
@@ -68,8 +68,8 @@ func TestCatalogMatchesRBACDocument(t *testing.T) {
 		want[c] = map[string]bool{}
 	}
 	rows := matrixRow.FindAllStringSubmatch(string(raw), -1)
-	if len(rows) != 34 {
-		t.Fatalf("expected 34 matrix rows in docs/rbac.md, parsed %d", len(rows))
+	if len(rows) != 35 {
+		t.Fatalf("expected 35 matrix rows in docs/rbac.md, parsed %d", len(rows))
 	}
 	for _, m := range rows {
 		cells := strings.Split(m[2], "|")

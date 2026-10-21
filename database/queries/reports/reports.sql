@@ -132,3 +132,56 @@ SELECT
   (SELECT count(*) FROM stays WHERE status = 'in_house')::bigint AS in_house,
   (SELECT count(*) FROM reservations WHERE status = 'confirmed' AND check_in = sqlc.arg('day')::date)::bigint AS arrivals,
   (SELECT count(*) FROM stays WHERE status = 'in_house' AND expected_out = sqlc.arg('day')::date)::bigint AS departures;
+
+-- Stage 26: expenses, profit and the day-close sheet.
+
+-- name: ExpensesByCategory :many
+SELECT e.category, count(*)::bigint AS entries, COALESCE(sum(e.amount_cents), 0)::bigint AS amount_cents
+FROM expenses e
+WHERE e.voided_at IS NULL AND e.expense_date BETWEEN sqlc.arg('from_day')::date AND sqlc.arg('to_day')::date
+GROUP BY e.category ORDER BY e.category;
+
+-- name: ExpenseRows :many
+SELECT e.expense_date, e.description, e.category, e.paid_by, e.paid_with, e.amount_cents
+FROM expenses e
+WHERE e.voided_at IS NULL AND e.expense_date BETWEEN sqlc.arg('from_day')::date AND sqlc.arg('to_day')::date
+ORDER BY e.expense_date, e.id;
+
+-- Cash taken from a drawer and entered on the shift as an expense. The day is the business date the movement was made.
+-- name: DrawerExpenses :many
+SELECT (cm.created_at AT TIME ZONE sqlc.arg('tz')::text)::date AS day, cm.reason, u.display_name AS paid_by, cm.amount_cents
+FROM cash_movements cm JOIN users u ON u.id = cm.created_by
+WHERE cm.kind = 'expense'
+  AND (cm.created_at AT TIME ZONE sqlc.arg('tz')::text)::date BETWEEN sqlc.arg('from_day')::date AND sqlc.arg('to_day')::date
+ORDER BY cm.created_at, cm.id;
+
+-- Stock that arrived, valued at what the delivery really cost, on the day it was received.
+-- name: StockReceivedByDay :many
+SELECT (p.received_at AT TIME ZONE sqlc.arg('tz')::text)::date AS day, count(DISTINCT p.id)::bigint AS purchases,
+       COALESCE(sum(pi.received_qty * pi.received_unit_cost_cents), 0)::bigint AS cost_cents
+FROM purchases p JOIN purchase_items pi ON pi.purchase_id = p.id
+WHERE p.status = 'received'
+  AND (p.received_at AT TIME ZONE sqlc.arg('tz')::text)::date BETWEEN sqlc.arg('from_day')::date AND sqlc.arg('to_day')::date
+GROUP BY 1 ORDER BY 1;
+
+-- name: ReturnsTotals :one
+SELECT COALESCE(sum(r.amount_cents), 0)::bigint AS amount_cents, COALESCE(sum(r.tax_cents), 0)::bigint AS tax_cents
+FROM refunds r
+WHERE r.business_date BETWEEN sqlc.arg('from_day')::date AND sqlc.arg('to_day')::date;
+
+-- name: SalesTotals :one
+SELECT COALESCE(sum(s.total_cents), 0)::bigint AS total_cents, COALESCE(sum(s.tax_cents), 0)::bigint AS tax_cents
+FROM sales s
+WHERE s.business_date BETWEEN sqlc.arg('from_day')::date AND sqlc.arg('to_day')::date;
+
+-- name: ShiftsOnDay :many
+SELECT sh.id, u.display_name AS cashier, sh.status, sh.opening_float_cents, sh.declared_cash_cents, sh.expected_cash_cents, sh.variance_cents
+FROM cashier_shifts sh JOIN users u ON u.id = sh.user_id
+WHERE (sh.opened_at AT TIME ZONE sqlc.arg('tz')::text)::date = sqlc.arg('day')::date
+ORDER BY sh.opened_at, sh.id;
+
+-- name: CashMovementsOnDay :many
+SELECT cm.kind, count(*)::bigint AS entries, COALESCE(sum(cm.amount_cents), 0)::bigint AS amount_cents
+FROM cash_movements cm
+WHERE (cm.created_at AT TIME ZONE sqlc.arg('tz')::text)::date = sqlc.arg('day')::date
+GROUP BY cm.kind ORDER BY cm.kind;
